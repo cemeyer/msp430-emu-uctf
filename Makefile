@@ -1,4 +1,4 @@
-FLAGS=-Wall -Wextra
+FLAGS=-Wall -Wextra -std=gnu99
 OPTFLAGS=`rpm -E %optflags`
 GLIB_FLAGS=`pkg-config --libs --cflags glib-2.0`
 
