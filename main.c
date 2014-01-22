@@ -192,13 +192,14 @@ handle_double(uint16_t instr)
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
-// R2 only supports AS_R2_*, AD_R2_ABS.
+// R2 only supports AS_R2_*, AD_R2_ABS (and direct for both).
 // R3 only supports As (no Ad).
 
 void
 load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
     uint16_t *srcval, enum operand_kind *srckind)
 {
+	uint16_t extensionword;
 
 	if (instr_decode_src == PC) {
 		if (As == AS_REGIND)
@@ -207,7 +208,18 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 
 	switch (instr_decode_src) {
 	case 2:
-		unhandled(instr);
+		switch (As) {
+		case AS_R2_ABS:
+			extensionword = memword(registers[PC]);
+			inc_reg(PC, 0);
+
+			*srckind = OP_MEM;
+			*srcval = extensionword;
+			break;
+		default:
+			unhandled(instr);
+			break;
+		}
 		break;
 	case 3:
 		unhandled(instr);
@@ -235,6 +247,7 @@ void
 load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
     uint16_t *dstval, enum operand_kind *dstkind)
 {
+	uint16_t extensionword;
 
 	if (instr_decode_dst == 3)
 		illins(instr);
@@ -243,7 +256,7 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 		*dstkind = OP_REG;
 		*dstval = instr_decode_dst;
 	} else {
-		uint16_t regval = 0, extensionword;
+		uint16_t regval = 0;
 
 		ASSERT(Ad == AD_IDX, "Ad");
 
@@ -273,6 +286,10 @@ unhandled(uint16_t instr)
 
 	printf("Instruction: %#04x @PC=%#04x is not implemented\n",
 	    (unsigned)instr, (unsigned)pc_start);
+	printf("Raw at PC: ");
+	for (unsigned i = 0; i < 6; i++)
+		printf("%02x", memory[pc_start+i]);
+	printf("\n");
 	abort_nodump();
 }
 
@@ -390,4 +407,34 @@ print_regs(void)
 		printf("r%02u %04x  r%02u %04x  r%02u %04x  r%02u %04x\n", i,
 		    (uns)registers[i], i + 1, (uns)registers[i+1], i + 2,
 		    (uns)registers[i+2], i + 3, (uns)registers[i+3]);
+}
+
+void
+taint_mem(uint16_t addr)
+{
+	struct taint *mt;
+
+	mt = malloc(sizeof(struct taint) + sizeof(uint16_t));
+	ASSERT(mt, "oom");
+	mt->ntaints = 1;
+	mt->addrs[0] = addr;
+
+	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
+}
+
+bool
+regtainted(uint16_t reg, uint16_t addr)
+{
+
+	for (unsigned i = 0; i < register_taint[reg]->ntaints; i++)
+		if (register_taint[reg]->addrs[i] == addr)
+			return true;
+	return false;
+}
+
+bool
+regtaintedexcl(uint16_t reg, uint16_t addr)
+{
+
+	return regtainted(reg, addr) && (register_taint[reg]->ntaints == 1);
 }

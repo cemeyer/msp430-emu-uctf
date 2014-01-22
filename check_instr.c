@@ -57,11 +57,33 @@ START_TEST(test_mov_const_reg)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
+	taint_mem(CODE_STEP + 2);
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[SP] == 0x4142);
+	ck_assert(regtaintedexcl(SP, CODE_STEP + 2));
+}
+END_TEST
+
+START_TEST(test_mov_sr_abs_reg)
+{
+	uint16_t code[] = {
+		0x4215,
+		0x1000,
+	};
+	uint16_t word = 0x1234;
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	install_words_le(&word, 0x1000, sizeof(word));
+	taint_mem(0x1000);
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0x1234);
+	ck_assert(regtaintedexcl(5, 0x1000));
 }
 END_TEST
 
@@ -73,6 +95,7 @@ suite_instr(void)
 	TCase *tmov = tcase_create("mov");
 	tcase_add_checked_fixture(tmov, setup_machine, teardown_machine);
 	tcase_add_test(tmov, test_mov_const_reg);
+	tcase_add_test(tmov, test_mov_sr_abs_reg);
 
 	suite_add_tcase(s, tmov);
 

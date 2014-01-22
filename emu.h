@@ -83,6 +83,9 @@ void		 illins(uint16_t instr);
 struct taint	*newtaint(void);
 void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
+void		 taint_mem(uint16_t addr);
+bool		 regtainted(uint16_t reg, uint16_t addr);
+bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 
 void	handle_jump(uint16_t instr);
 void	handle_single(uint16_t instr);
