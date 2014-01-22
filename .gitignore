@@ -1,3 +1,4 @@
 .*.swp
 *.bin
 msp430-emu
+check_instr

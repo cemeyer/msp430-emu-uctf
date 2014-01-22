@@ -1,20 +1,4 @@
-#include <sys/cdefs.h>
-
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <glib.h>
-
-#define likely(cond) __builtin_expect ((cond), 1)
-#define unlikely(cond) __builtin_expect ((cond), 0)
-
-struct taint {
-	unsigned	ntaints;
-	uint16_t	addrs[0];
-};
+#include "emu.h"
 
 uint16_t	 pc_start;
 uint16_t	 registers[16];
@@ -22,73 +6,33 @@ uint8_t		 memory[0x10000];
 struct taint	*register_taint[16];
 GHashTable	*memory_taint;		// addr -> struct taint
 
-#define PC 0
-#define SP 1
-#define SR 2
-#define CG 3
+void
+init(void)
+{
 
-#define AS_REG    0x00
-#define AS_IDX    0x10
-#define AS_REGIND 0x20
-#define AS_INDINC 0x30
+	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
+	ASSERT(memory_taint, "g_hash");
 
-#define AS_R2_ABS 0x10
-#define AS_R2_4   0x20
-#define AS_R2_8   0x30
+	for (unsigned reg = 0; reg < 16; reg++)
+		register_taint[reg] = newtaint();
+}
 
-#define AS_R3_0   0x00
-#define AS_R3_1   0x10
-#define AS_R3_2   0x20
-#define AS_R3_NEG 0x30
+void
+destroy(void)
+{
 
-#define AD_REG    0x00
-#define AD_IDX    0x80
+	ASSERT(memory_taint, "mem_taint_hash");
+	g_hash_table_destroy(memory_taint);
+	memory_taint = NULL;
 
-#define AD_R2_ABS 0x80
+	for (unsigned reg = 0; reg < 16; reg++) {
+		ASSERT(register_taint[reg], "reg_taint");
+		free(register_taint[reg]);
+		register_taint[reg] = NULL;
+	}
+}
 
-#define SR_CPUOFF 0x0010
-
-enum operand_kind {
-	OP_REG,
-	OP_MEM,
-	OP_CONST,
-};
-
-typedef unsigned int uns;
-
-#define ASSERT(cond, args...) do { \
-	if (likely(!!(cond))) \
-		break; \
-	printf("%s:%u: ASSERT %s failed: ", __FILE__, __LINE__, #cond); \
-	printf(args); \
-	printf("\n"); \
-	abort_nodump(); \
-} while (false)
-
-static void	abort_nodump(void);
-static void	emulate(void);
-static uint16_t	memword(uint16_t addr);
-static void	mem2reg(uint16_t addr, unsigned reg);
-static void	reg2mem(unsigned reg, uint16_t addr);
-static uint16_t	bits(uint16_t v, unsigned max, unsigned min);
-static void	copytaint(struct taint **dest, const struct taint *src);
-static void	unhandled(uint16_t instr);
-static void	illins(uint16_t instr);
-static struct taint	*newtaint(void);
-static void	inc_reg(uint16_t reg, uint16_t bw);
-static void	print_regs(void);
-
-static void	handle_jump(uint16_t instr);
-static void	handle_single(uint16_t instr);
-static void	handle_double(uint16_t instr);
-
-static void	load_src(uint16_t instr, uint16_t instr_decode_src,
-			 uint16_t As, uint16_t bw, uint16_t *srcval,
-			 enum operand_kind *srckind);
-static void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
-			 uint16_t Ad, uint16_t *dstval,
-			 enum operand_kind *dstkind);
-
+#ifndef EMU_CHECK
 int
 main(int argc, char **argv)
 {
@@ -99,9 +43,6 @@ main(int argc, char **argv)
 		printf("usage: msp430-emu [binaryimage]\n");
 		exit(1);
 	}
-
-	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
-	ASSERT(memory_taint, "g_hash");
 
 	romfile = fopen(argv[1], "rb");
 	ASSERT(romfile, "fopen");
@@ -120,18 +61,39 @@ main(int argc, char **argv)
 	// XXX set memory taints
 	// XXX or just auto-set on getsn()
 
-	for (unsigned reg = 0; reg < 16; reg++)
-		register_taint[reg] = newtaint();
-
+	init();
 	emulate();
 
 	return 0;
 }
+#endif
 
-static void
-emulate(void)
+void
+emulate1(void)
 {
 	uint16_t instr;
+
+	pc_start = registers[PC];
+	ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
+
+	instr = memword(registers[PC]);
+
+	switch (bits(instr, 15, 13)) {
+	case 0:
+		handle_single(instr);
+		break;
+	case 0x2000:
+		handle_jump(instr);
+		break;
+	default:
+		handle_double(instr);
+		break;
+	}
+}
+
+void
+emulate(void)
+{
 
 	mem2reg(0xfffe, PC);
 	printf("Initial register state:\n");
@@ -139,22 +101,8 @@ emulate(void)
 	printf("============================================\n\n");
 
 	while (true) {
-		pc_start = registers[PC];
-		ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
+		emulate1();
 
-		instr = memword(registers[PC]);
-
-		switch (bits(instr, 15, 13)) {
-		case 0:
-			handle_single(instr);
-			break;
-		case 0x2000:
-			handle_jump(instr);
-			break;
-		default:
-			handle_double(instr);
-			break;
-		}
 		// DDD
 		print_regs();
 		printf("\n");
@@ -167,7 +115,7 @@ emulate(void)
 	}
 }
 
-static void
+void
 inc_reg(uint16_t reg, uint16_t bw)
 {
 	uint16_t inc = 2;
@@ -178,21 +126,21 @@ inc_reg(uint16_t reg, uint16_t bw)
 	registers[reg] = (registers[reg] + inc) & 0xffff;
 }
 
-static void
+void
 handle_jump(uint16_t instr)
 {
 
 	unhandled(instr);
 }
 
-static void
+void
 handle_single(uint16_t instr)
 {
 
 	unhandled(instr);
 }
 
-static void
+void
 handle_double(uint16_t instr)
 {
 	enum operand_kind srckind, dstkind;
@@ -247,7 +195,7 @@ handle_double(uint16_t instr)
 // R2 only supports AS_R2_*, AD_R2_ABS.
 // R3 only supports As (no Ad).
 
-static void
+void
 load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
     uint16_t *srcval, enum operand_kind *srckind)
 {
@@ -283,7 +231,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 // R2 only supports AS_R2_*, AD_R2_ABS.
 // R3 only supports As (no Ad).
 
-static void
+void
 load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
     uint16_t *dstval, enum operand_kind *dstkind)
 {
@@ -310,7 +258,7 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 	}
 }
 
-static struct taint *
+struct taint *
 newtaint(void)
 {
 	struct taint *res = malloc(sizeof(struct taint));
@@ -319,7 +267,7 @@ newtaint(void)
 	return res;
 }
 
-static void
+void
 unhandled(uint16_t instr)
 {
 
@@ -328,7 +276,7 @@ unhandled(uint16_t instr)
 	abort_nodump();
 }
 
-static void
+void
 illins(uint16_t instr)
 {
 
@@ -337,7 +285,7 @@ illins(uint16_t instr)
 	abort_nodump();
 }
 
-static uint16_t
+uint16_t
 memword(uint16_t addr)
 {
 
@@ -346,7 +294,7 @@ memword(uint16_t addr)
 	return memory[addr] | ((uint16_t)memory[addr+1] << 8);
 }
 
-static void
+void
 mem2reg(uint16_t addr, unsigned reg)
 {
 	struct taint *memtaint;
@@ -367,7 +315,7 @@ mem2reg(uint16_t addr, unsigned reg)
 	registers[reg] = val;
 }
 
-static void
+void
 reg2mem(unsigned reg, uint16_t addr)
 {
 
@@ -396,7 +344,7 @@ reg2mem(unsigned reg, uint16_t addr)
 	memory[addr+1] = (registers[reg] >> 8) & 0xff;
 }
 
-static uint16_t
+uint16_t
 bits(uint16_t v, unsigned max, unsigned min)
 {
 	uint16_t mask;
@@ -411,7 +359,7 @@ bits(uint16_t v, unsigned max, unsigned min)
 	return v & mask;
 }
 
-static void
+void
 copytaint(struct taint **dest, const struct taint *src)
 {
 	size_t tsize;
@@ -424,7 +372,7 @@ copytaint(struct taint **dest, const struct taint *src)
 	memcpy(*dest, src, tsize);
 }
 
-static void
+void
 abort_nodump(void)
 {
 
@@ -432,7 +380,7 @@ abort_nodump(void)
 	exit(1);
 }
 
-static void
+void
 print_regs(void)
 {
 
