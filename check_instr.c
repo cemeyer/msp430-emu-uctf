@@ -49,6 +49,7 @@ teardown_machine(void)
 	destroy();
 }
 
+// mov #4400, sp
 START_TEST(test_mov_const_reg)
 {
 	uint16_t code[] = {
@@ -67,6 +68,7 @@ START_TEST(test_mov_const_reg)
 }
 END_TEST
 
+// mov &#1000, r5
 START_TEST(test_mov_sr_abs_reg)
 {
 	uint16_t code[] = {
@@ -87,6 +89,21 @@ START_TEST(test_mov_sr_abs_reg)
 }
 END_TEST
 
+// and.b #-1, r5
+START_TEST(test_and_b_cgneg1_reg)
+{
+	uint16_t code[] = { 0xf375, };
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0x8182;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0x0082);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -96,6 +113,7 @@ suite_instr(void)
 	tcase_add_checked_fixture(tmov, setup_machine, teardown_machine);
 	tcase_add_test(tmov, test_mov_const_reg);
 	tcase_add_test(tmov, test_mov_sr_abs_reg);
+	tcase_add_test(tmov, test_and_b_cgneg1_reg);
 
 	suite_add_tcase(s, tmov);
 

@@ -154,6 +154,8 @@ handle_double(uint16_t instr)
 
 	inc_reg(PC, 0);
 
+	//printf("Src,Ad,bw,As,Dst\n%#04x,%#02x,%#02x,%#02x,%#04x\n", (uns)dsrc,
+	//    (uns)Ad, (uns)bw, (uns)As, (uns)ddst);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 	load_dst(instr, ddst, Ad, &dstval, &dstkind);
 
@@ -163,7 +165,14 @@ handle_double(uint16_t instr)
 		//printf("DDD MOV(src:%x, dst: %x, as:%x, ad:%x, b/w:%x)\n",
 		//    (uns)dsrc, (uns)ddst, (uns)As, (uns)Ad, (uns)bw);
 
-		if (dstkind == OP_MEM) {
+		if (dstkind == OP_REG) {
+			if (srckind == OP_MEM) {
+				printf("DDD MOV @%#04x (%#04x), r%d\n",
+				    (uns)srcval, memword(srcval), (uns)dstval);
+				mem2reg(srcval, dstval);
+			} else
+				unhandled(instr);
+		} else if (dstkind == OP_MEM) {
 			if (bw) {
 			} else {
 				ASSERT((dstval & 0x1) == 0, "word store "
@@ -171,24 +180,30 @@ handle_double(uint16_t instr)
 			}
 
 			unhandled(instr);
-		} else if (dstkind == OP_REG) {
-			if (srckind == OP_MEM) {
-				printf("DDD MOV @%#04x (%#04x), r%d\n",
-				    (uns)srcval, memword(srcval), (uns)dstval);
-				mem2reg(srcval, dstval);
-			} else
-				unhandled(instr);
-
-			if (bw)
-				registers[dstval] &= 0x00ff;
 		} else
 			unhandled(instr);
 
+		break;
+	case 0xf000:
+		// AND
+		if (dstkind == OP_REG) {
+			if (srckind == OP_CONST) {
+				printf("DDD AND #%#04x, r%d\n", (uns)srcval,
+				    (uns)dstval);
+
+				registers[dstval] = registers[dstval] & srcval;
+			} else
+				unhandled(instr);
+		} else
+			unhandled(instr);
 		break;
 	default:
 		unhandled(instr);
 		break;
 	}
+
+	if (dstkind == OP_REG && bw)
+		registers[dstval] &= 0x00ff;
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
@@ -207,7 +222,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 	}
 
 	switch (instr_decode_src) {
-	case 2:
+	case SR:
 		switch (As) {
 		case AS_R2_ABS:
 			extensionword = memword(registers[PC]);
@@ -221,8 +236,16 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			break;
 		}
 		break;
-	case 3:
-		unhandled(instr);
+	case CG:
+		switch (As) {
+		case AS_R3_NEG:
+			*srckind = OP_CONST;
+			*srcval = 0xffff;
+			break;
+		default:
+			unhandled(instr);
+			break;
+		}
 		break;
 	default:
 		switch (As) {
@@ -249,7 +272,7 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 {
 	uint16_t extensionword;
 
-	if (instr_decode_dst == 3)
+	if (instr_decode_dst == CG)
 		illins(instr);
 
 	if (Ad == AD_REG) {
