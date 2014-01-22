@@ -130,6 +130,26 @@ START_TEST(test_bis_imm_reg)
 }
 END_TEST
 
+START_TEST(test_bisb_imm_reg)
+{
+	uint16_t code[] = {
+		// bis.b #0x5a08, r5
+		0xd075,
+		0x5a08,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	taint_mem(CODE_STEP + 2);
+	registers[5] = 0x8182;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0x008a);
+	ck_assert(regtaintedexcl(5, CODE_STEP + 2));
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -149,6 +169,7 @@ suite_instr(void)
 	TCase *tbis = tcase_create("bis");
 	tcase_add_checked_fixture(tbis, setup_machine, teardown_machine);
 	tcase_add_test(tbis, test_bis_imm_reg);
+	tcase_add_test(tbis, test_bisb_imm_reg);
 	suite_add_tcase(s, tbis);
 
 	return s;
