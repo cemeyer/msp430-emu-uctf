@@ -89,6 +89,7 @@ START_TEST(test_mov_sr_abs_reg)
 }
 END_TEST
 
+// XXX TODO set flags (clear v, affect nzc)
 // and.b #-1, r5
 START_TEST(test_and_b_cgneg1_reg)
 {
@@ -104,6 +105,31 @@ START_TEST(test_and_b_cgneg1_reg)
 }
 END_TEST
 
+START_TEST(test_bis_imm_reg)
+{
+	uint16_t code[] = {
+		// mov #0082, r5
+		0x4035,
+		0x0082,
+		// bis #0x5a08, r5
+		0xd035,
+		0x5a08,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	taint_mem(CODE_STEP + 2);
+	taint_mem(CODE_STEP + 6);
+
+	emulate1();
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 8);
+	ck_assert(registers[5] == 0x5a8a);
+	ck_assert(regtainted(5, CODE_STEP + 2));
+	ck_assert(regtainted(5, CODE_STEP + 6));
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -113,9 +139,17 @@ suite_instr(void)
 	tcase_add_checked_fixture(tmov, setup_machine, teardown_machine);
 	tcase_add_test(tmov, test_mov_const_reg);
 	tcase_add_test(tmov, test_mov_sr_abs_reg);
-	tcase_add_test(tmov, test_and_b_cgneg1_reg);
-
 	suite_add_tcase(s, tmov);
+
+	TCase *tand = tcase_create("and");
+	tcase_add_checked_fixture(tand, setup_machine, teardown_machine);
+	tcase_add_test(tand, test_and_b_cgneg1_reg);
+	suite_add_tcase(s, tand);
+
+	TCase *tbis = tcase_create("bis");
+	tcase_add_checked_fixture(tbis, setup_machine, teardown_machine);
+	tcase_add_test(tbis, test_bis_imm_reg);
+	suite_add_tcase(s, tbis);
 
 	return s;
 }

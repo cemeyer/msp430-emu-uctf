@@ -84,6 +84,7 @@ struct taint	*newtaint(void);
 void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
 void		 taint_mem(uint16_t addr);
+void		 addtaint(struct taint **dst, struct taint *src);
 bool		 regtainted(uint16_t reg, uint16_t addr);
 bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 

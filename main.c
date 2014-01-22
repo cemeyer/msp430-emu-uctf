@@ -161,14 +161,15 @@ handle_double(uint16_t instr)
 
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
-		// MOV
+		// MOV (no flags)
 		//printf("DDD MOV(src:%x, dst: %x, as:%x, ad:%x, b/w:%x)\n",
 		//    (uns)dsrc, (uns)ddst, (uns)As, (uns)Ad, (uns)bw);
 
 		if (dstkind == OP_REG) {
 			if (srckind == OP_MEM) {
 				printf("DDD MOV @%#04x (%#04x), r%d\n",
-				    (uns)srcval, memword(srcval), (uns)dstval);
+				    (uns)srcval, (uns)memword(srcval),
+				    (uns)dstval);
 				mem2reg(srcval, dstval);
 			} else
 				unhandled(instr);
@@ -184,7 +185,25 @@ handle_double(uint16_t instr)
 			unhandled(instr);
 
 		break;
+	case 0xd000:
+		// BIS (no flags)
+		if (dstkind == OP_REG) {
+			if (srckind == OP_MEM) {
+				printf("DDD BIS @%#04x (%#04x), r%d\n",
+				    (uns)srcval, (uns)memword(srcval),
+				    (uns)dstval);
+				addtaint(&register_taint[dstval],
+				    g_hash_table_lookup(memory_taint,
+					GINT_TO_POINTER(srcval)));
+
+				registers[dstval] |= memword(srcval);
+			} else
+				unhandled(instr);
+		} else
+			unhandled(instr);
+		break;
 	case 0xf000:
+		// TODO affects flags
 		// AND
 		if (dstkind == OP_REG) {
 			if (srckind == OP_CONST) {
@@ -460,4 +479,37 @@ regtaintedexcl(uint16_t reg, uint16_t addr)
 {
 
 	return regtainted(reg, addr) && (register_taint[reg]->ntaints == 1);
+}
+
+void
+addtaint(struct taint **dst, struct taint *src)
+{
+	unsigned total = (*dst)->ntaints;
+
+	if (src == NULL)
+		return;
+
+	if (src->ntaints == 0)
+		return;
+
+	total += src->ntaints;
+	*dst = realloc(*dst, sizeof(**dst) + total*sizeof(uint16_t));
+	ASSERT(*dst, "oom");
+
+	for (unsigned i = 0; i < src->ntaints; i++) {
+		uint16_t taddr = src->addrs[i];
+		bool dupe = false;
+
+		for (unsigned j = 0; j < (*dst)->ntaints; j++) {
+			if ((*dst)->addrs[j] == taddr) {
+				dupe = true;
+				break;
+			}
+		}
+
+		if (!dupe) {
+			(*dst)->addrs[(*dst)->ntaints] = taddr;
+			(*dst)->ntaints += 1;
+		}
+	}
 }
