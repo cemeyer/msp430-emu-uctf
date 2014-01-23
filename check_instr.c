@@ -1156,6 +1156,24 @@ START_TEST(test_daddb)
 }
 END_TEST
 
+START_TEST(test_dadd_pcind_reg)
+{
+	uint16_t code[] = {
+		0xa02e,		// dadd @pc, r14
+		0x3c01,		// another instruction
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[14] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[14] == 0x4201);
+	ck_assert_flags(0);
+}
+END_TEST
+
 START_TEST(test_rra)
 {
 	uint16_t code[] = {
@@ -1354,6 +1372,7 @@ suite_instr(void)
 	tcase_add_checked_fixture(tdadd, setup_machine, teardown_machine);
 	tcase_add_test(tdadd, test_dadd);
 	tcase_add_test(tdadd, test_daddb);
+	tcase_add_test(tdadd, test_dadd_pcind_reg);
 	suite_add_tcase(s, tdadd);
 
 	TCase *trra = tcase_create("rra");

@@ -602,11 +602,6 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 {
 	uint16_t extensionword;
 
-	if (instr_decode_src == PC) {
-		if (As == AS_REGIND)
-			illins(instr);
-	}
-
 	switch (instr_decode_src) {
 	case SR:
 		switch (As) {
