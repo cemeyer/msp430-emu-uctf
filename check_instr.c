@@ -432,6 +432,39 @@ START_TEST(test_jmp_z2)
 }
 END_TEST
 
+START_TEST(test_jmp_nz)
+{
+	uint16_t code[] = {
+		// jnz $-0x0a
+		0x23fa,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = SR_Z;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+}
+END_TEST
+
+START_TEST(test_jmp_nz2)
+{
+	uint16_t code[] = {
+		// jnz $-0x0a
+		0x23fa,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = 0;
+
+	emulate1();
+
+	ck_assert_msg(registers[PC] == CODE_STEP - 0xa, "%04x != %04x",
+	    (uns)registers[PC], CODE_STEP - 0xa);
+}
+END_TEST
+
 START_TEST(test_sub_const_reg)
 {
 	uint16_t code[] = {
@@ -540,6 +573,8 @@ suite_instr(void)
 	tcase_add_checked_fixture(tjmp, setup_machine, teardown_machine);
 	tcase_add_test(tjmp, test_jmp_z);
 	tcase_add_test(tjmp, test_jmp_z2);
+	tcase_add_test(tjmp, test_jmp_nz);
+	tcase_add_test(tjmp, test_jmp_nz2);
 	suite_add_tcase(s, tjmp);
 
 	TCase *tsub = tcase_create("sub");

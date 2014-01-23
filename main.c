@@ -138,7 +138,7 @@ handle_jump(uint16_t instr)
 
 	// sign-extend
 	if (offset & 0x200)
-		offset |= 0xfc;
+		offset |= 0xfc00;
 
 	// double
 	offset = (offset << 1) & 0xffff;
@@ -146,6 +146,11 @@ handle_jump(uint16_t instr)
 	inc_reg(PC, 0);
 
 	switch (cnd) {
+	case 0x0:
+		// JNZ
+		if ((registers[SR] & SR_Z) == 0)
+			shouldjump = true;
+		break;
 	case 0x1:
 		// JZ
 		if (registers[SR] & SR_Z)
