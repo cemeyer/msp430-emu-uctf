@@ -192,6 +192,11 @@ handle_jump(uint16_t instr)
 		if (registers[SR] & SR_Z)
 			shouldjump = true;
 		break;
+	case 0x2:
+		// JNC
+		if ((registers[SR] & SR_C) == 0)
+			shouldjump = true;
+		break;
 	case 0x7:
 		// JMP
 		shouldjump = true;
