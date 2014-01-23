@@ -27,6 +27,7 @@ init(void)
 	insns = 0;
 	start = now();
 	memset(memory, 0, sizeof(memory));
+	memwriteword(0x10, 0x4130); // callgate
 	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
 	ASSERT(memory_taint, "g_hash");
 
@@ -1032,6 +1033,8 @@ void
 win(void)
 {
 
-	printf("The lock opens; you win!\n");
+	printf("The lock opens; you win!\n\n");
+	print_regs();
+	print_ips();
 	exit(0);
 }
