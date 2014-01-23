@@ -646,6 +646,106 @@ START_TEST(test_addb_reg_reg)
 }
 END_TEST
 
+START_TEST(test_addc)
+{
+	uint16_t code[] = {
+		0x6405,		// addc r4, r5
+	};
+
+	uint16_t initial[] = {
+		22588, 32074,
+		26948, 54384,
+		1753, 1196,
+		14823, 30308,
+		48520, 17015,
+	};
+	uint16_t initflags[] = {
+		SR_C|SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+	};
+	uint16_t result[] = {
+		54663,
+		15796,
+		2949,
+		45132,
+		0,
+	};
+	uint16_t rflags[] = {
+		SR_N,
+		SR_C,
+		0,
+		SR_N,
+		SR_C|SR_Z,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(result); i++) {
+		registers[4] = initial[2*i];
+		registers[5] = initial[2*i+1];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[4] == initial[2*i]);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
+START_TEST(test_addcb)
+{
+	uint16_t code[] = {
+		0x6445,		// addc.b r4, r5
+	};
+
+	uint16_t initial[] = {
+		0x7f, 0x7f,
+		0x80, 0x7f,
+		0x01, 0x51,
+	};
+	uint16_t initflags[] = {
+		SR_Z,
+		SR_C|SR_N,
+		SR_C|SR_N|SR_Z,
+	};
+	uint16_t result[] = {
+		0xfe,
+		0x00,
+		0x53,
+	};
+	uint16_t rflags[] = {
+		0,
+		SR_Z|SR_C,
+		0,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(result); i++) {
+		registers[4] = initial[2*i];
+		registers[5] = initial[2*i+1];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[4] == initial[2*i]);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
 START_TEST(test_sub_const_reg)
 {
 	uint16_t code[] = {
@@ -1325,6 +1425,8 @@ suite_instr(void)
 	tcase_add_test(tadd, test_add_imm_reg);
 	tcase_add_test(tadd, test_addb_imm_reg);
 	tcase_add_test(tadd, test_addb_reg_reg);
+	tcase_add_test(tadd, test_addc);
+	tcase_add_test(tadd, test_addcb);
 	suite_add_tcase(s, tadd);
 
 	TCase *tcall = tcase_create("call");

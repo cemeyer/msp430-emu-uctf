@@ -475,6 +475,20 @@ handle_double(uint16_t instr)
 		else
 			res &= 0xffff;
 		break;
+	case 0x6000:
+		// ADDC (flags)
+		ta = t_add;
+		if (bw) {
+			dstnum &= 0xff;
+			srcnum &= 0xff;
+		}
+		res = dstnum + srcnum + ((registers[SR] & SR_C) ? 1 : 0);
+		addflags(res, bw, &setflags, &clrflags);
+		if (bw)
+			res &= 0x00ff;
+		else
+			res &= 0xffff;
+		break;
 	case 0x8000:
 		// SUB (flags)
 		ta = t_add;
