@@ -572,6 +572,43 @@ START_TEST(test_sub_imm_mem)
 }
 END_TEST
 
+START_TEST(test_call_sp)
+{
+	uint16_t code[] = {
+		// call sp
+		0x1281,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SP] = 0x4000;
+
+	emulate1();
+
+	ck_assert(registers[PC] == 0x4000);
+	ck_assert(registers[SP] == 0x3ffe);
+	ck_assert(memword(0x3ffe) == CODE_STEP + 2);
+}
+END_TEST
+
+START_TEST(test_call_imm)
+{
+	uint16_t code[] = {
+		// call imm
+		0x12b0,
+		0x1234,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SP] = 0x4000;
+
+	emulate1();
+
+	ck_assert(registers[PC] == 0x1234);
+	ck_assert(registers[SP] == 0x3ffe);
+	ck_assert(memword(0x3ffe) == CODE_STEP + 4);
+}
+END_TEST
+
 
 Suite *
 suite_instr(void)
@@ -627,6 +664,12 @@ suite_instr(void)
 	tcase_add_test(tadd, test_add_imm_reg);
 	tcase_add_test(tadd, test_addb_imm_reg);
 	suite_add_tcase(s, tadd);
+
+	TCase *tcall = tcase_create("call");
+	tcase_add_checked_fixture(tcall, setup_machine, teardown_machine);
+	tcase_add_test(tcall, test_call_sp);
+	tcase_add_test(tcall, test_call_imm);
+	suite_add_tcase(s, tcall);
 
 	return s;
 }

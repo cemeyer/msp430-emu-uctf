@@ -99,6 +99,7 @@ void		 _unhandled(const char *f, unsigned l, uint16_t instr);
 void		 _illins(const char *f, unsigned l, uint16_t instr);
 struct taint	*newtaint(void);
 void		 inc_reg(uint16_t reg, uint16_t bw);
+void		 dec_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
 void		 taint_mem(uint16_t addr);
 void		 addtaint(struct taint **dst, struct taint *src);

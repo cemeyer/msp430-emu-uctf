@@ -150,6 +150,17 @@ inc_reg(uint16_t reg, uint16_t bw)
 }
 
 void
+dec_reg(uint16_t reg, uint16_t bw)
+{
+	uint16_t inc = 2;
+
+	if (reg != PC && reg != SP && bw)
+		inc = 1;
+
+	registers[reg] = (registers[reg] - inc) & 0xffff;
+}
+
+void
 handle_jump(uint16_t instr)
 {
 	uint16_t cnd = bits(instr, 12, 10) >> 10,
@@ -188,8 +199,98 @@ handle_jump(uint16_t instr)
 void
 handle_single(uint16_t instr)
 {
+	enum operand_kind srckind, dstkind;
+	uint16_t constbits = bits(instr, 12, 10) >> 10,
+		 bw = bits(instr, 6, 6),
+		 As = bits(instr, 5, 4),
+		 dsrc = bits(instr, 3, 0),
+		 srcval, srcnum, dstval;
+	struct taint *taintsrc = NULL;
+	unsigned res = 0x10000;
+	uint16_t setflags = 0,
+		 clrflags = SR_V /* per #uctf emu */;
+	enum taint_apply ta = t_ignore;
 
-	unhandled(instr);
+	inc_reg(PC, 0);
+	load_src(instr, dsrc, As, bw, &srcval, &srckind);
+
+	// Load addressed src values
+	switch (srckind) {
+	case OP_REG:
+		taintsrc = register_taint[srcval];
+		srcnum = registers[srcval];
+		break;
+	case OP_MEM:
+		taintsrc = g_hash_table_lookup(memory_taint,
+		    GINT_TO_POINTER(srcval & 0xfffe));
+		if (bw)
+			srcnum = memory[srcval];
+		else
+			srcnum = memword(srcval);
+		break;
+	case OP_CONST:
+		srcnum = srcval;
+		break;
+	default:
+		ASSERT(false, "illins");
+		break;
+	}
+
+	// '0x0000' is an illegal instruction, but #uctf ignores bits 0x1800 in
+	// single-op instructions. We'll do it just for zero, trap on
+	// everything else...
+	if (constbits != 0x4 && instr != 0x0)
+		illins(instr);
+
+	switch (bits(instr, 9, 7)) {
+	case 0x280:
+		// CALL (no flags)
+		ta = t_copy;
+
+		// Call [src]
+		res = srcnum;
+		dstval = PC;
+		dstkind = OP_REG;
+
+		// Push PC+1
+		dec_reg(SP, 0);
+		memwriteword(registers[SP], registers[PC]);
+		copytaintmem(registers[SP], register_taint[PC]);
+		break;
+	default:
+		unhandled(instr);
+		break;
+	}
+
+	ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+	registers[SR] |= setflags;
+	registers[SR] &= ~clrflags;
+
+	if (dstkind == OP_REG) {
+		ASSERT(res != 0x10000, "res never set");
+
+		if (bw)
+			res &= 0x00ff;
+
+		registers[dstval] = res & 0xffff;
+		if (ta == t_add)
+			addtaint(&register_taint[dstval], taintsrc);
+		else if (ta == t_copy)
+			copytaint(&register_taint[dstval], taintsrc);
+	} else if (dstkind == OP_MEM) {
+		if (bw) {
+			if (ta == t_copy)
+				ta = t_add;
+			memory[dstval] = res & 0xff;
+		} else
+			memwriteword(dstval, res);
+
+		if (ta == t_add)
+			addtaintmem(dstval & 0xfffe, taintsrc);
+		else if (ta == t_copy)
+			copytaintmem(dstval, taintsrc);
+	} else
+		ASSERT(dstkind == OP_FLAGSONLY, "x");
 }
 
 void
