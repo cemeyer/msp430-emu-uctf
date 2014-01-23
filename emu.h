@@ -32,6 +32,8 @@ extern uint16_t		 registers[16];
 extern uint8_t		 memory[0x10000];
 extern struct taint	*register_taint[16];
 extern GHashTable	*memory_taint;		// addr -> struct taint
+extern bool		 off;
+extern bool		 unlocked;
 
 #define PC 0
 #define SP 1
@@ -113,6 +115,7 @@ void		 addflags(unsigned res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
 void		 andflags(uint16_t res, uint16_t *set, uint16_t *clr);
 uint64_t	 now(void);	// microseconds
+void		 getsn(uint16_t addr, uint16_t len);
 
 void	handle_jump(uint16_t instr);
 void	handle_single(uint16_t instr);

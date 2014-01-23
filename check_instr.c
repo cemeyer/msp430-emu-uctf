@@ -938,6 +938,20 @@ START_TEST(test_xor)
 }
 END_TEST
 
+START_TEST(test_nop)
+{
+	uint16_t code[] = {
+		0x4303,		// mov cg, cg
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1032,6 +1046,11 @@ suite_instr(void)
 	tcase_add_checked_fixture(txor, setup_machine, teardown_machine);
 	tcase_add_test(txor, test_xor);
 	suite_add_tcase(s, txor);
+
+	TCase *tnop = tcase_create("nop");
+	tcase_add_checked_fixture(tnop, setup_machine, teardown_machine);
+	tcase_add_test(tnop, test_nop);
+	suite_add_tcase(s, tnop);
 
 	return s;
 }

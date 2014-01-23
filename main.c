@@ -7,6 +7,8 @@ struct taint	*register_taint[16];
 GHashTable	*memory_taint;		// addr -> struct taint
 uint64_t	 start;
 uint64_t	 insns;
+bool		 off;
+bool		 unlocked;
 
 static void
 print_ips(void)
@@ -25,6 +27,7 @@ init(void)
 {
 
 	insns = 0;
+	off = unlocked = false;
 	start = now();
 	memset(memory, 0, sizeof(memory));
 	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
@@ -83,6 +86,7 @@ main(int argc, char **argv)
 	// XXX or just auto-set on getsn()
 
 	emulate();
+	printf("Got CPUOFF, stopped.\n");
 
 	print_ips();
 
@@ -120,9 +124,11 @@ emulate(void)
 {
 
 	mem2reg(0xfffe, PC);
+#ifndef QUIET
 	printf("Initial register state:\n");
 	print_regs();
 	printf("============================================\n\n");
+#endif
 
 	while (true) {
 		if (registers[PC] == 0x0010) {
@@ -133,11 +139,14 @@ emulate(void)
 			}
 		}
 
+		if (off)
+			break;
+
 		emulate1();
 
 		ASSERT(registers[CG] == 0, "CG");
 		if (registers[SR] & SR_CPUOFF) {
-			printf("Got CPUOFF, stopped.\n");
+			off = true;
 			break;
 		}
 	}
@@ -395,6 +404,9 @@ handle_double(uint16_t instr)
 		else
 			dstnum = memword(dstval);
 		break;
+	case OP_CONST:
+		ASSERT(instr == 0x4303, "nop");
+		return;
 	default:
 		ASSERT(false, "illins");
 		break;
@@ -612,8 +624,12 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 {
 	uint16_t extensionword;
 
-	if (instr_decode_dst == CG)
-		illins(instr);
+	if (instr_decode_dst == CG) {
+		ASSERT(instr == 0x4303, "nop");
+		*dstkind = OP_CONST;
+		*dstval = 0;
+		return;
+	}
 
 	if (Ad == AD_REG) {
 		*dstkind = OP_REG;
@@ -995,48 +1011,22 @@ callgate(unsigned op)
 {
 	uint16_t argaddr = registers[SP] + 8,
 		 getsaddr;
-	char *buf;
 	size_t bufsz;
 
 	switch (op) {
 	case 0x0:
+#ifndef QUIET
 		putchar((char)memory[argaddr]);
+#endif
 		break;
 	case 0x2:
+#ifndef QUIET
 		printf("Gets (':'-prefix for hex)> ");
 		fflush(stdout);
-
+#endif
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
-		ASSERT((size_t)getsaddr + bufsz < 0xffff, "overflow");
-		memset(&memory[getsaddr], 0, bufsz);
-
-		buf = malloc(2 * bufsz + 2);
-		ASSERT(buf, "oom");
-		buf[0] = 0;
-
-		if (fgets(buf, 2 * bufsz + 2, stdin) == NULL) {
-			free(buf);
-			memory[getsaddr] = 0;
-			break;
-		}
-
-		if (buf[0] != ':')
-			strncpy((char*)&memory[getsaddr], buf, bufsz);
-		else {
-			for (unsigned i = 0; i < bufsz - 1; i++) {
-				unsigned byte;
-
-				if (buf[2*i+1] == 0 || buf[2*i+2] == 0)
-					break;
-
-				sscanf(&buf[2*i+1], "%02x", &byte);
-				//printf("%02x", byte);
-				memory[getsaddr + i] = byte;
-			}
-		}
-		memory[getsaddr + bufsz - 1] = 0;
-		free(buf);
+		getsn(getsaddr, bufsz);
 		break;
 	case 0x7d:
 		// writes a non-zero byte to supplied pointer if password is
@@ -1063,5 +1053,45 @@ win(void)
 	printf("The lock opens; you win!\n\n");
 	print_regs();
 	print_ips();
-	exit(0);
+	off = true;
+	unlocked = true;
 }
+
+#ifndef AUTO_GETSN
+void
+getsn(uint16_t addr, uint16_t bufsz)
+{
+	char *buf;
+
+	ASSERT((size_t)addr + bufsz < 0xffff, "overflow");
+	memset(&memory[addr], 0, bufsz);
+
+	if (bufsz <= 1)
+		return;
+
+	buf = malloc(2 * bufsz + 2);
+	ASSERT(buf, "oom");
+	buf[0] = 0;
+
+	if (fgets(buf, 2 * bufsz + 2, stdin) == NULL)
+		goto out;
+
+	if (buf[0] != ':')
+		strncpy((char*)&memory[addr], buf, bufsz);
+	else {
+		for (unsigned i = 0; i < bufsz - 1u; i++) {
+			unsigned byte;
+
+			if (buf[2*i+1] == 0 || buf[2*i+2] == 0)
+				break;
+
+			sscanf(&buf[2*i+1], "%02x", &byte);
+			//printf("%02x", byte);
+			memory[addr + i] = byte;
+		}
+	}
+	memory[addr + bufsz - 1] = 0;
+out:
+	free(buf);
+}
+#endif
