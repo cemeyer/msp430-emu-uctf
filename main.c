@@ -104,11 +104,11 @@ emulate(void)
 	printf("============================================\n\n");
 
 	while (true) {
-		emulate1();
+		if (registers[PC] == 0x0010) {
+			// TODO: callgate
+		}
 
-		// DDD
-		print_regs();
-		printf("\n");
+		emulate1();
 
 		ASSERT(registers[CG] == 0, "CG");
 		if (registers[SR] & SR_CPUOFF) {
@@ -242,6 +242,12 @@ handle_double(uint16_t instr)
 		// MOV (no flags)
 		ta = t_copy;
 		res = srcnum;
+		break;
+	case 0x8000:
+		// SUB
+		ta = t_add;
+		res = dstnum - srcnum;
+		subflags(res, dstnum, &setflags, &clrflags);
 		break;
 	case 0x9000:
 		// CMP

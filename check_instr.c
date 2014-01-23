@@ -432,6 +432,76 @@ START_TEST(test_jmp_z2)
 }
 END_TEST
 
+START_TEST(test_sub_const_reg)
+{
+	uint16_t code[] = {
+		// dec r15   (aka: sub #1, r15)
+		0x831f,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0xffff);
+	ck_assert_msg(sr_flags() == (SR_C | SR_N), "sr_flags: %#04x",
+	    sr_flags());
+}
+END_TEST
+
+START_TEST(test_sub_imm_reg)
+{
+	uint16_t code[] = {
+		// sub #5, r5
+		0x8035,
+		0x5,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 10;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 5);
+	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x",
+	    sr_flags());
+
+	registers[PC] = CODE_STEP;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0);
+	ck_assert_msg(sr_flags() == SR_Z, "sr_flags: %#04x", sr_flags());
+}
+END_TEST
+
+START_TEST(test_sub_imm_mem)
+{
+	uint16_t code[] = {
+		// sub #5, 0x15(r5)
+		0x80b5,
+		0x0005,
+		0x0015,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0x2401;
+	memwriteword(0x2416, 0x0100);
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 6);
+	ck_assert(registers[5] == 0x2401);
+	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x", sr_flags());
+	ck_assert(memword(0x2416) == 0x00fb);
+}
+END_TEST
+
+
 Suite *
 suite_instr(void)
 {
@@ -471,6 +541,13 @@ suite_instr(void)
 	tcase_add_test(tjmp, test_jmp_z);
 	tcase_add_test(tjmp, test_jmp_z2);
 	suite_add_tcase(s, tjmp);
+
+	TCase *tsub = tcase_create("sub");
+	tcase_add_checked_fixture(tsub, setup_machine, teardown_machine);
+	tcase_add_test(tsub, test_sub_const_reg);
+	tcase_add_test(tsub, test_sub_imm_reg);
+	tcase_add_test(tsub, test_sub_imm_mem);
+	suite_add_tcase(s, tsub);
 
 	return s;
 }
