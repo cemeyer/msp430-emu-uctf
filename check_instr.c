@@ -1000,6 +1000,55 @@ START_TEST(test_rrc)
 }
 END_TEST
 
+START_TEST(test_rrcb)
+{
+	uint16_t code[] = {
+		0x104e,		// rrc.b r14
+	};
+
+	uint16_t initial[] = {
+		0x1,
+		0x0,
+		0xa5a5,
+		0x52d2,
+	};
+	uint16_t initflags[] = {
+		0,
+		SR_C | SR_Z,
+		SR_Z,
+		SR_C | SR_Z,
+	};
+	uint16_t result[] = {
+		0x0,
+		0x80,
+		0x52,
+		0xe9,
+	};
+	uint16_t rflags[] = {
+		SR_C,
+		0,
+		SR_C,
+		0,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(initial); i++) {
+		registers[14] = initial[i];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[14] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
+
 Suite *
 suite_instr(void)
 {
@@ -1103,6 +1152,7 @@ suite_instr(void)
 	TCase *trrc = tcase_create("rrc");
 	tcase_add_checked_fixture(trrc, setup_machine, teardown_machine);
 	tcase_add_test(trrc, test_rrc);
+	tcase_add_test(trrc, test_rrcb);
 	suite_add_tcase(s, trrc);
 
 	return s;
