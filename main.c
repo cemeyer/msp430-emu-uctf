@@ -271,6 +271,31 @@ handle_single(uint16_t instr)
 		illins(instr);
 
 	switch (bits(instr, 9, 7)) {
+	case 0x000:
+		// RRC
+		if (bw)
+			srcnum &= 0xff;
+		res = srcnum >> 1;
+		if (registers[SR] & SR_C) {
+			if (bw)
+				res |= 0x80;
+			else
+				res |= 0x8000;
+		}
+
+		if (srcnum & 0x1)
+			setflags |= SR_C;
+		else
+			clrflags |= SR_C;
+		if (res & 0x8000)
+			setflags |= SR_N;
+		// doesn't clear N
+		if (res)
+			clrflags |= SR_Z;
+		// doesn't set Z
+		dstval = srcval;
+		dstkind = srckind;
+		break;
 	case 0x080:
 		// SWPB (no flags)
 		res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
@@ -1027,6 +1052,11 @@ callgate(unsigned op)
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
 		getsn(getsaddr, bufsz);
+		break;
+	case 0x20:
+		// RNG
+		registers[15] = 0;
+		copytaint(&register_taint[15], NULL);
 		break;
 	case 0x7d:
 		// writes a non-zero byte to supplied pointer if password is

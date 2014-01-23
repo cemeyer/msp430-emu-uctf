@@ -16,6 +16,8 @@
 #define likely(cond) __builtin_expect ((cond), 1)
 #define unlikely(cond) __builtin_expect ((cond), 0)
 
+#define ARRAYLEN(arr) ((sizeof(arr)) / sizeof((arr)[0]))
+
 struct taint {
 	unsigned	ntaints;
 	uint16_t	addrs[0];
