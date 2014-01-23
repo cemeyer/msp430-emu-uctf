@@ -836,6 +836,23 @@ START_TEST(test_sxt_reg3)
 }
 END_TEST
 
+START_TEST(test_swpb_r15)
+{
+	uint16_t code[] = {
+		0x108f,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0xbeef;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0xefbe);
+	ck_assert_flags(0);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -916,6 +933,11 @@ suite_instr(void)
 	tcase_add_test(tsxt, test_sxt_reg2);
 	tcase_add_test(tsxt, test_sxt_reg3);
 	suite_add_tcase(s, tsxt);
+
+	TCase *tswpb = tcase_create("swpb");
+	tcase_add_checked_fixture(tswpb, setup_machine, teardown_machine);
+	tcase_add_test(tswpb, test_swpb_r15);
+	suite_add_tcase(s, tswpb);
 
 	return s;
 }

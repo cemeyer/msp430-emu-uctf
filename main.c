@@ -247,6 +247,12 @@ handle_single(uint16_t instr)
 		illins(instr);
 
 	switch (bits(instr, 9, 7)) {
+	case 0x080:
+		// SWPB (no flags)
+		res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
+		dstval = srcval;
+		dstkind = srckind;
+		break;
 	case 0x180:
 		// SXT (sets flags)
 		if (srcnum & 0x80)
