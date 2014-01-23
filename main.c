@@ -1008,6 +1008,8 @@ callgate(unsigned op)
 
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
+		ASSERT((size_t)getsaddr + bufsz < 0xffff, "overflow");
+		memset(&memory[getsaddr], 0, bufsz);
 
 		buf = malloc(2 * bufsz + 2);
 		ASSERT(buf, "oom");
@@ -1037,9 +1039,9 @@ callgate(unsigned op)
 		free(buf);
 		break;
 	case 0x7d:
-		// writes a non-zero word to supplied pointer if password is
-		// correct (arg[0]). never correct.
-		memwriteword(memword(argaddr+2), 0);
+		// writes a non-zero byte to supplied pointer if password is
+		// correct (arg[0]). password is never correct.
+		memory[memword(argaddr+2)] = 0;
 		break;
 	case 0x7e:
 		// triggers unlock if password is correct; nop
