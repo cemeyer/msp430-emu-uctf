@@ -111,6 +111,7 @@ void		 addflags(uint16_t res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
 void		 subflags(uint16_t res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
+void		 andflags(uint16_t res, uint16_t *set, uint16_t *clr);
 uint64_t	 now(void);	// microseconds
 
 void	handle_jump(uint16_t instr);

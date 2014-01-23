@@ -247,6 +247,17 @@ handle_single(uint16_t instr)
 		illins(instr);
 
 	switch (bits(instr, 9, 7)) {
+	case 0x180:
+		// SXT (sets flags)
+		if (srcnum & 0x80)
+			res = srcnum | 0xff00;
+		else
+			res = srcnum & 0x00ff;
+
+		dstval = srcval;
+		dstkind = srckind;
+		andflags(res, &setflags, &clrflags);
+		break;
 	case 0x200:
 		// PUSH (no flags)
 		ta = t_copy;
@@ -404,18 +415,7 @@ handle_double(uint16_t instr)
 		res = dstnum & srcnum;
 		if (bw)
 			res &= 0x00ff;
-
-		if (res & 0x8000)
-			setflags |= SR_N;
-		else
-			clrflags |= SR_N;
-		if (res == 0) {
-			setflags |= SR_Z;
-			clrflags |= SR_C;
-		} else {
-			clrflags |= SR_Z;
-			setflags |= SR_C;
-		}
+		andflags(res, &setflags, &clrflags);
 		break;
 	default:
 		unhandled(instr);
@@ -915,6 +915,26 @@ addflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
 		*set |= SR_C;
 	else
 		*clr |= SR_C;
+}
+
+// set flags based on result; used in AND, SXT, ...
+void
+andflags(uint16_t res, uint16_t *set, uint16_t *clr)
+{
+
+	*clr |= SR_V;
+
+	if (res & 0x8000)
+		*set |= SR_N;
+	else
+		*clr |= SR_N;
+	if (res == 0) {
+		*set |= SR_Z;
+		*clr |= SR_C;
+	} else {
+		*clr |= SR_Z;
+		*set |= SR_C;
+	}
 }
 
 uint64_t

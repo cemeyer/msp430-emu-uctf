@@ -700,6 +700,56 @@ START_TEST(test_push_sp_incr)
 }
 END_TEST
 
+START_TEST(test_sxt_reg)
+{
+	uint16_t code[] = {
+		0x118f,		// sxt r15
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0x80;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0xff80);
+	ck_assert(sr_flags() == (SR_C | SR_N));
+}
+END_TEST
+
+START_TEST(test_sxt_reg2)
+{
+	uint16_t code[] = {
+		0x118f,		// sxt r15
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0x7f;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0x007f);
+	ck_assert(sr_flags() == SR_C);
+}
+END_TEST
+
+START_TEST(test_sxt_reg3)
+{
+	uint16_t code[] = {
+		0x118f,		// sxt r15
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0);
+	ck_assert(sr_flags() == SR_Z);
+}
+END_TEST
 
 Suite *
 suite_instr(void)
@@ -770,6 +820,13 @@ suite_instr(void)
 	tcase_add_test(tpush, test_push_imm);
 	tcase_add_test(tpush, test_push_sp_incr);
 	suite_add_tcase(s, tpush);
+
+	TCase *tsxt = tcase_create("sxt");
+	tcase_add_checked_fixture(tsxt, setup_machine, teardown_machine);
+	tcase_add_test(tsxt, test_sxt_reg);
+	tcase_add_test(tsxt, test_sxt_reg2);
+	tcase_add_test(tsxt, test_sxt_reg3);
+	suite_add_tcase(s, tsxt);
 
 	return s;
 }
