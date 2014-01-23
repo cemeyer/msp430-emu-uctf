@@ -445,6 +445,14 @@ handle_double(uint16_t instr)
 		ta = t_add;
 		res = dstnum | srcnum;
 		break;
+	case 0xe000:
+		// XOR (flags)
+		ta = t_add;
+		res = dstnum ^ srcnum;
+		if (bw)
+			res &= 0x00ff;
+		andflags(res, &setflags, &clrflags);
+		break;
 	case 0xf000:
 		// AND (flags)
 		ta = t_add;

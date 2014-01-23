@@ -853,6 +853,25 @@ START_TEST(test_swpb_r15)
 }
 END_TEST
 
+START_TEST(test_xor)
+{
+	uint16_t code[] = {
+		0xe405,		// xor r4, r5
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[4] = 0xffff;
+	registers[5] = 0xbeef;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[4] == 0xffff);
+	ck_assert(registers[5] == 0x4110);
+	ck_assert_flags(SR_C);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -938,6 +957,11 @@ suite_instr(void)
 	tcase_add_checked_fixture(tswpb, setup_machine, teardown_machine);
 	tcase_add_test(tswpb, test_swpb_r15);
 	suite_add_tcase(s, tswpb);
+
+	TCase *txor = tcase_create("xor");
+	tcase_add_checked_fixture(txor, setup_machine, teardown_machine);
+	tcase_add_test(txor, test_xor);
+	suite_add_tcase(s, txor);
 
 	return s;
 }
