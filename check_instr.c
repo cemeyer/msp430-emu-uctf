@@ -203,6 +203,25 @@ START_TEST(test_mov_pre_incr)
 }
 END_TEST
 
+// mov	r5, &0x015c
+START_TEST(test_mov_reg_abs)
+{
+	uint16_t code[] = {
+		0x4582,
+		0x015c,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0xbeef;
+
+	emulate1();
+
+	ck_assert(memword(0x015c) == 0xbeef);
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert_msg(registers[5] == 0xbeef);
+}
+END_TEST
+
 // and.b #-1, r5
 START_TEST(test_and_b_cgneg1_reg)
 {
@@ -423,6 +442,7 @@ suite_instr(void)
 	tcase_add_test(tmov, test_mov_const_reg);
 	tcase_add_test(tmov, test_mov_sr_abs_reg);
 	tcase_add_test(tmov, test_mov_pre_incr);
+	tcase_add_test(tmov, test_mov_reg_abs);
 	suite_add_tcase(s, tmov);
 
 	TCase *tand = tcase_create("and");

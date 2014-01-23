@@ -327,6 +327,10 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 	switch (instr_decode_src) {
 	case SR:
 		switch (As) {
+		case AS_REG:
+			*srckind = OP_REG;
+			*srcval = instr_decode_src;
+			break;
 		case AS_R2_ABS:
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
@@ -334,8 +338,16 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			*srckind = OP_MEM;
 			*srcval = extensionword;
 			break;
+		case AS_R2_4:
+			*srckind = OP_CONST;
+			*srcval = 4;
+			break;
+		case AS_R2_8:
+			*srckind = OP_CONST;
+			*srcval = 8;
+			break;
 		default:
-			unhandled(instr);
+			illins(instr);
 			break;
 		}
 		break;
@@ -345,24 +357,47 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			*srckind = OP_CONST;
 			*srcval = 0;
 			break;
+		case AS_R3_1:
+			*srckind = OP_CONST;
+			*srcval = 1;
+			break;
+		case AS_R3_2:
+			*srckind = OP_CONST;
+			*srcval = 2;
+			break;
 		case AS_R3_NEG:
 			*srckind = OP_CONST;
 			*srcval = 0xffff;
 			break;
 		default:
-			unhandled(instr);
+			illins(instr);
 			break;
 		}
 		break;
 	default:
 		switch (As) {
+		case AS_REG:
+			*srckind = OP_REG;
+			*srcval = instr_decode_src;
+			break;
+		case AS_IDX:
+			extensionword = memword(registers[PC]);
+			inc_reg(PC, 0);
+			*srckind = OP_MEM;
+			*srcval = (registers[instr_decode_src] + extensionword)
+			    & 0xffff;
+			break;
+		case AS_REGIND:
+			*srckind = OP_MEM;
+			*srcval = registers[instr_decode_src];
+			break;
 		case AS_INDINC:
 			*srckind = OP_MEM;
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
 			break;
 		default:
-			unhandled(instr);
+			illins(instr);
 			break;
 		}
 		break;
@@ -411,11 +446,11 @@ newtaint(void)
 }
 
 void
-unhandled(uint16_t instr)
+_unhandled(const char *f, unsigned l, uint16_t instr)
 {
 
-	printf("Instruction: %#04x @PC=%#04x is not implemented\n",
-	    (unsigned)instr, (unsigned)pc_start);
+	printf("%s:%u: Instruction: %#04x @PC=%#04x is not implemented\n",
+	    f, l, (unsigned)instr, (unsigned)pc_start);
 	printf("Raw at PC: ");
 	for (unsigned i = 0; i < 6; i++)
 		printf("%02x", memory[pc_start+i]);
@@ -424,11 +459,15 @@ unhandled(uint16_t instr)
 }
 
 void
-illins(uint16_t instr)
+_illins(const char *f, unsigned l, uint16_t instr)
 {
 
-	printf("ILLEGAL Instruction: %#04x @PC=%#04x\n", (unsigned)instr,
-	    (unsigned)pc_start);
+	printf("%s:%u: ILLEGAL Instruction: %#04x @PC=%#04x\n",
+	    f, l, (unsigned)instr, (unsigned)pc_start);
+	printf("Raw at PC: ");
+	for (unsigned i = 0; i < 6; i++)
+		printf("%02x", memory[pc_start+i]);
+	printf("\n");
 	abort_nodump();
 }
 

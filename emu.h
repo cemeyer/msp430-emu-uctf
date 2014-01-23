@@ -91,8 +91,10 @@ void		 reg2mem(unsigned reg, uint16_t addr);
 uint16_t	 bits(uint16_t v, unsigned max, unsigned min);
 void		 copytaint(struct taint **dest, const struct taint *src);
 void		 copytaintmem(uint16_t addr, const struct taint *src);
-void		 unhandled(uint16_t instr);
-void		 illins(uint16_t instr);
+#define unhandled(instr) _unhandled(__FILE__, __LINE__, instr)
+void		 _unhandled(const char *f, unsigned l, uint16_t instr);
+#define illins(instr) _illins(__FILE__, __LINE__, instr)
+void		 _illins(const char *f, unsigned l, uint16_t instr);
 struct taint	*newtaint(void);
 void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
