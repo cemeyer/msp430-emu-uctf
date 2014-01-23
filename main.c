@@ -69,12 +69,14 @@ main(int argc, char **argv)
 
 	idx = 0;
 	while (true) {
-		rd = fread(memory, 1, sizeof(memory) - idx, romfile);
+		rd = fread(&memory[idx], 1, sizeof(memory) - idx, romfile);
 		if (rd == 0)
 			break;
 		idx += rd;
 	}
-	printf("Loaded %zu words from image.\n", idx);
+	printf("Loaded %zu words from image.\n", idx/2);
+	ASSERT(memword(0x10) == 0x4130, "No callgate at 0x10??: Instead: %04x",
+	    memword(0x10));
 
 	fclose(romfile);
 
@@ -125,7 +127,11 @@ emulate(void)
 
 	while (true) {
 		if (registers[PC] == 0x0010) {
-			// TODO: callgate
+			// Callgate
+			if (registers[SR] & 0x8000) {
+				unsigned op = (registers[SR] >> 8) & 0x7f;
+				callgate(op);
+			}
 		}
 
 		emulate1();
@@ -769,6 +775,13 @@ print_regs(void)
 		printf("r%02u %04x  r%02u %04x  r%02u %04x  r%02u %04x\n", i,
 		    (uns)registers[i], i + 1, (uns)registers[i+1], i + 2,
 		    (uns)registers[i+2], i + 3, (uns)registers[i+3]);
+	printf("stack:");
+	for (unsigned i = 0; i < 4; i++)
+		printf("  %04x", (uns)memword((registers[SP] & 0xfffe) + 2*i));
+	printf("\n      ");
+	for (unsigned i = 4; i < 8; i++)
+		printf("  %04x", (uns)memword((registers[SP] & 0xfffe) + 2*i));
+	printf("\n");
 }
 
 void
@@ -983,4 +996,19 @@ now(void)
 	ASSERT(rc == 0, "clock_gettime: %d:%s", errno, strerror(errno));
 
 	return ((uint64_t)1000000 * ts.tv_sec + (ts.tv_nsec / 1000));
+}
+
+void
+callgate(unsigned op)
+{
+	uint16_t argaddr = registers[SP] + 8;
+
+	switch (op) {
+	case 0x0:
+		putchar((char)memory[argaddr]);
+		break;
+	default:
+		unhandled(0x4130);
+		break;
+	}
 }
