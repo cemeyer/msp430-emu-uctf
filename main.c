@@ -243,6 +243,14 @@ handle_single(uint16_t instr)
 		illins(instr);
 
 	switch (bits(instr, 9, 7)) {
+	case 0x200:
+		// PUSH (no flags)
+		ta = t_copy;
+		res = srcnum;
+		dec_reg(SP, 0);
+		dstval = registers[SP];
+		dstkind = OP_MEM;
+		break;
 	case 0x280:
 		// CALL (no flags)
 		ta = t_copy;

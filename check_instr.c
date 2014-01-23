@@ -609,6 +609,67 @@ START_TEST(test_call_imm)
 }
 END_TEST
 
+START_TEST(test_push_reg)
+{
+	uint16_t code[] = {
+		// push r11
+		0x120b,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SP] = 0x4000;
+	registers[11] = 0xdead;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[SP] == 0x3ffe);
+	ck_assert(memword(0x3ffe) == 0xdead);
+}
+END_TEST
+
+START_TEST(test_push_imm)
+{
+	uint16_t code[] = {
+		// push #0xbeef
+		0x1230,
+		0xbeef,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SP] = 0x4000;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[SP] == 0x3ffe);
+	ck_assert(memword(0x3ffe) == 0xbeef);
+}
+END_TEST
+
+START_TEST(test_push_sp_incr)
+{
+	uint16_t code[] = {
+		// push @sp+
+		0x1231,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SP] = 0x4000;
+	memwriteword(0x3ffe, 0xa1b1);
+	memwriteword(0x4000, 0xc1d1);
+	memwriteword(0x4002, 0xe1f1);
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[SP] == 0x4000);
+	ck_assert(memword(0x3ffe) == 0xa1b1);
+	ck_assert(memword(0x4000) == 0xc1d1);
+	ck_assert(memword(0x4002) == 0xe1f1);
+}
+END_TEST
+
 
 Suite *
 suite_instr(void)
@@ -670,6 +731,13 @@ suite_instr(void)
 	tcase_add_test(tcall, test_call_sp);
 	tcase_add_test(tcall, test_call_imm);
 	suite_add_tcase(s, tcall);
+
+	TCase *tpush = tcase_create("push");
+	tcase_add_checked_fixture(tpush, setup_machine, teardown_machine);
+	tcase_add_test(tpush, test_push_reg);
+	tcase_add_test(tpush, test_push_imm);
+	tcase_add_test(tpush, test_push_sp_incr);
+	suite_add_tcase(s, tpush);
 
 	return s;
 }
