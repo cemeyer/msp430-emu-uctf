@@ -1027,9 +1027,15 @@ callgate(unsigned op)
 		free(buf);
 		break;
 	case 0x7d:
+		// writes a non-zero word to supplied pointer if password is
+		// correct (arg[0]). never correct.
 		memwriteword(memword(argaddr+2), 0);
 		break;
+	case 0x7e:
+		// triggers unlock if password is correct; nop
+		break;
 	case 0x7f:
+		// unlock.
 		win();
 		break;
 	default:
