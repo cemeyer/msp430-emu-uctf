@@ -302,6 +302,24 @@ handle_single(uint16_t instr)
 		dstval = srcval;
 		dstkind = srckind;
 		break;
+	case 0x100:
+		// RRA (flags)
+		if (bw)
+			srcnum &= 0xff;
+		res = srcnum >> 1;
+		if (bw && (0x80 & srcnum))
+			res |= 0x80;
+		else if (bw == 0 && (0x8000 & srcnum))
+			res |= 0x8000;
+
+		clrflags |= SR_Z;
+		if (0x8000 & res)
+			setflags |= SR_N;
+
+		dstval = srcval;
+		dstkind = srckind;
+
+		break;
 	case 0x180:
 		// SXT (sets flags)
 		if (srcnum & 0x80)

@@ -1156,6 +1156,93 @@ START_TEST(test_daddb)
 }
 END_TEST
 
+START_TEST(test_rra)
+{
+	uint16_t code[] = {
+		0x1105,		// rra r5
+	};
+
+	uint16_t initial[] = {
+		0xff80,
+		0x0001,
+		0x8000,
+	};
+	uint16_t initflags[] = {
+		SR_C|SR_Z,
+		SR_Z|SR_N,
+		SR_C|SR_Z,
+	};
+	uint16_t result[] = {
+		0xffc0,
+		0x0000,
+		0xc000,
+	};
+	uint16_t rflags[] = {
+		SR_C|SR_N,
+		SR_N,
+		SR_C|SR_N,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(initial); i++) {
+		registers[5] = initial[i];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
+START_TEST(test_rrab)
+{
+	uint16_t code[] = {
+		0x1145,		// rra.b r5
+	};
+
+	uint16_t initial[] = {
+		0xff80,
+		0x0001,
+		0x8080,
+	};
+	uint16_t initflags[] = {
+		SR_C|SR_Z,
+		SR_Z|SR_N,
+		SR_C|SR_Z,
+	};
+	uint16_t result[] = {
+		0xc0,
+		0x00,
+		0xc0,
+	};
+	uint16_t rflags[] = {
+		SR_C,
+		SR_N,
+		SR_C,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(initial); i++) {
+		registers[5] = initial[i];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
 
 Suite *
 suite_instr(void)
@@ -1268,6 +1355,12 @@ suite_instr(void)
 	tcase_add_test(tdadd, test_dadd);
 	tcase_add_test(tdadd, test_daddb);
 	suite_add_tcase(s, tdadd);
+
+	TCase *trra = tcase_create("rra");
+	tcase_add_checked_fixture(trra, setup_machine, teardown_machine);
+	tcase_add_test(trra, test_rra);
+	tcase_add_test(trra, test_rrab);
+	suite_add_tcase(s, trra);
 
 	return s;
 }
