@@ -5,11 +5,27 @@ uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
 struct taint	*register_taint[16];
 GHashTable	*memory_taint;		// addr -> struct taint
+uint64_t	 start;
+uint64_t	 insns;
+
+static void
+print_ips(void)
+{
+	uint64_t end = now();
+
+	if (end == start)
+		end++;
+
+	printf("Approx. %ju instructions per second.\n",
+	    (uintmax_t)insns * 1000000 / (end - start));
+}
 
 void
 init(void)
 {
 
+	insns = 0;
+	start = now();
 	memset(memory, 0, sizeof(memory));
 	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
 	ASSERT(memory_taint, "g_hash");
@@ -67,6 +83,8 @@ main(int argc, char **argv)
 
 	emulate();
 
+	print_ips();
+
 	return 0;
 }
 #endif
@@ -92,6 +110,8 @@ emulate1(void)
 		handle_double(instr);
 		break;
 	}
+
+	insns++;
 }
 
 void
@@ -591,6 +611,7 @@ abort_nodump(void)
 {
 
 	print_regs();
+	print_ips();
 	exit(1);
 }
 
@@ -781,4 +802,16 @@ addflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
 		*set |= SR_C;
 	else
 		*clr |= SR_C;
+}
+
+uint64_t
+now(void)
+{
+	struct timespec ts;
+	int rc;
+
+	rc = clock_gettime(CLOCK_REALTIME, &ts);
+	ASSERT(rc == 0, "clock_gettime: %d:%s", errno, strerror(errno));
+
+	return ((uint64_t)1000000 * ts.tv_sec + (ts.tv_nsec / 1000));
 }

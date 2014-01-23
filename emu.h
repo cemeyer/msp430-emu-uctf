@@ -3,11 +3,13 @@
 
 #include <sys/cdefs.h>
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <glib.h>
 
@@ -108,6 +110,7 @@ void		 addflags(uint16_t res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
 void		 subflags(uint16_t res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
+uint64_t	 now(void);	// microseconds
 
 void	handle_jump(uint16_t instr);
 void	handle_single(uint16_t instr);
