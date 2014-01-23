@@ -203,8 +203,6 @@ handle_double(uint16_t instr)
 	case OP_REG:
 		taintsrc = register_taint[srcval];
 		srcnum = registers[srcval];
-		if (bw)
-			srcnum &= 0xff;
 		break;
 	case OP_MEM:
 		taintsrc = g_hash_table_lookup(memory_taint,
@@ -216,8 +214,6 @@ handle_double(uint16_t instr)
 		break;
 	case OP_CONST:
 		srcnum = srcval;
-		if (bw)
-			srcnum &= 0xff;
 		break;
 	default:
 		ASSERT(false, "illins");
@@ -228,8 +224,6 @@ handle_double(uint16_t instr)
 	switch (dstkind) {
 	case OP_REG:
 		dstnum = registers[dstval];
-		if (bw)
-			dstnum &= 0xff;
 		break;
 	case OP_MEM:
 		if (bw)

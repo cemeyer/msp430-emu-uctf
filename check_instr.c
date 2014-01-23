@@ -503,6 +503,25 @@ START_TEST(test_add_imm_reg)
 }
 END_TEST
 
+START_TEST(test_addb_imm_reg)
+{
+	uint16_t code[] = {
+		0x5075,		// add imm, r5
+		0xbeef,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0xffff;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0xee);
+	ck_assert_msg(sr_flags() == SR_C, "sr_flags: %#04x",
+	    sr_flags());
+}
+END_TEST
+
 START_TEST(test_sub_imm_reg)
 {
 	uint16_t code[] = {
@@ -606,6 +625,7 @@ suite_instr(void)
 	TCase *tadd = tcase_create("add");
 	tcase_add_checked_fixture(tadd, setup_machine, teardown_machine);
 	tcase_add_test(tadd, test_add_imm_reg);
+	tcase_add_test(tadd, test_addb_imm_reg);
 	suite_add_tcase(s, tadd);
 
 	return s;
