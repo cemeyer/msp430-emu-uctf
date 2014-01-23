@@ -62,9 +62,10 @@ extern GHashTable	*memory_taint;		// addr -> struct taint
 #define SR_C      0x0001
 
 enum operand_kind {
-	OP_REG,
-	OP_MEM,
-	OP_CONST,
+	OP_REG,		// reg direct
+	OP_MEM,		// immediate (inline), other mem indirects
+	OP_CONST,	// cg-/sr-based specials
+	OP_FLAGSONLY,	// cmp
 };
 
 typedef unsigned int uns;
@@ -101,6 +102,8 @@ void		 addtaintmem(uint16_t addr, struct taint *src);
 bool		 regtainted(uint16_t reg, uint16_t addr);
 bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 uint16_t	 sr_flags(void);
+void		 subflags(uint16_t res, uint16_t orig, uint16_t *set,
+			  uint16_t *clr);
 
 void	handle_jump(uint16_t instr);
 void	handle_single(uint16_t instr);

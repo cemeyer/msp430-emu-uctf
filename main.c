@@ -219,6 +219,12 @@ handle_double(uint16_t instr)
 		ta = t_copy;
 		res = srcnum;
 		break;
+	case 0x9000:
+		// CMP
+		dstkind = OP_FLAGSONLY;
+		res = dstnum - srcnum;
+		subflags(res, dstnum, &setflags, &clrflags);
+		break;
 	case 0xd000:
 		// BIS (no flags)
 		ta = t_add;
@@ -275,7 +281,8 @@ handle_double(uint16_t instr)
 			addtaintmem(dstval & 0xfffe, taintsrc);
 		else if (ta == t_copy)
 			copytaintmem(dstval, taintsrc);
-	}
+	} else
+		ASSERT(dstkind == OP_FLAGSONLY, "x");
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
@@ -649,4 +656,30 @@ memwriteword(uint16_t addr, uint16_t word)
 	    (uns)addr);
 	memory[addr] = word & 0xff;
 	memory[addr+1] = (word >> 8) & 0xff;
+}
+
+// Set flags after a subtraction, resulting in res.
+void
+subflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
+{
+	if (res & 0x8000)
+		*set |= SR_N;
+	else
+		*clr |= SR_N;
+
+	// #uctf never sets V
+#if 0
+	if ((res & 0x8000) ^ (orig & 0x8000))
+		*set |= SR_V;
+#endif
+
+	if (res == 0)
+		*set |= SR_Z;
+	else
+		*clr |= SR_Z;
+
+	if (res > orig)
+		*set |= SR_C;
+	else
+		*clr |= SR_C;
 }

@@ -322,6 +322,24 @@ START_TEST(test_bisb_imm_reg)
 }
 END_TEST
 
+START_TEST(test_cmp_const_reg)
+{
+	uint16_t code[] = {
+		// tst r5   (aka: cmp #0, r5)
+		0x9305,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0);
+	ck_assert_msg(sr_flags() == SR_Z, "sr_flags: %#04x", sr_flags());
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -347,6 +365,11 @@ suite_instr(void)
 	tcase_add_test(tbis, test_bis_imm_reg);
 	tcase_add_test(tbis, test_bisb_imm_reg);
 	suite_add_tcase(s, tbis);
+
+	TCase *tcmp = tcase_create("cmp");
+	tcase_add_checked_fixture(tcmp, setup_machine, teardown_machine);
+	tcase_add_test(tcmp, test_cmp_const_reg);
+	suite_add_tcase(s, tcmp);
 
 	return s;
 }
