@@ -340,6 +340,47 @@ START_TEST(test_cmp_const_reg)
 }
 END_TEST
 
+START_TEST(test_cmp_imm_reg)
+{
+	uint16_t code[] = {
+		// cmp #5, r5
+		0x9035,
+		0x0500,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0);
+	ck_assert_msg(sr_flags() == (SR_N | SR_C), "sr_flags: %#04x",
+	    sr_flags());
+}
+END_TEST
+
+START_TEST(test_cmp_imm_mem)
+{
+	uint16_t code[] = {
+		// cmp #5, @(r5)
+		0x90b5,
+		0x0005,
+		0x0000,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0x2400;
+	memwriteword(0x2400, 0x0100);
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 6);
+	ck_assert(registers[5] == 0x2400);
+	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x", sr_flags());
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -369,6 +410,8 @@ suite_instr(void)
 	TCase *tcmp = tcase_create("cmp");
 	tcase_add_checked_fixture(tcmp, setup_machine, teardown_machine);
 	tcase_add_test(tcmp, test_cmp_const_reg);
+	tcase_add_test(tcmp, test_cmp_imm_reg);
+	tcase_add_test(tcmp, test_cmp_imm_mem);
 	suite_add_tcase(s, tcmp);
 
 	return s;
