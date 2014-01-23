@@ -1001,11 +1001,48 @@ now(void)
 void
 callgate(unsigned op)
 {
-	uint16_t argaddr = registers[SP] + 8;
+	uint16_t argaddr = registers[SP] + 8,
+		 getsaddr;
+	char *buf;
+	size_t bufsz;
 
 	switch (op) {
 	case 0x0:
 		putchar((char)memory[argaddr]);
+		break;
+	case 0x2:
+		printf("Gets (':'-prefix for hex)> ");
+		fflush(stdout);
+
+		getsaddr = memword(argaddr);
+		bufsz = (uns)memword(argaddr+2);
+
+		buf = malloc(2 * bufsz + 2);
+		ASSERT(buf, "oom");
+		buf[0] = 0;
+
+		if (fgets(buf, 2 * bufsz + 2, stdin) == NULL) {
+			free(buf);
+			memory[getsaddr] = 0;
+			break;
+		}
+
+		if (buf[0] != ':')
+			strncpy((char*)&memory[getsaddr], buf, bufsz);
+		else {
+			for (unsigned i = 0; i < bufsz - 1; i++) {
+				unsigned byte;
+
+				if (buf[2*i+1] == 0 || buf[2*i+2] == 0)
+					break;
+
+				sscanf(&buf[2*i+1], "%02x", &byte);
+				//printf("%02x", byte);
+				memory[getsaddr + i] = byte;
+			}
+		}
+		memory[getsaddr + bufsz - 1] = 0;
+		free(buf);
 		break;
 	default:
 		unhandled(0x4130);
