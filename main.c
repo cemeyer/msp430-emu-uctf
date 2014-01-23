@@ -1026,6 +1026,9 @@ callgate(unsigned op)
 		memory[getsaddr + bufsz - 1] = 0;
 		free(buf);
 		break;
+	case 0x7d:
+		memwriteword(memword(argaddr+2), 0);
+		break;
 	case 0x7f:
 		win();
 		break;
