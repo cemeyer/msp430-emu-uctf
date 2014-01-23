@@ -132,8 +132,32 @@ inc_reg(uint16_t reg, uint16_t bw)
 void
 handle_jump(uint16_t instr)
 {
+	uint16_t cnd = bits(instr, 12, 10) >> 10,
+		 offset = bits(instr, 9, 0);
+	bool shouldjump = false;
 
-	unhandled(instr);
+	// sign-extend
+	if (offset & 0x200)
+		offset |= 0xfc;
+
+	// double
+	offset = (offset << 1) & 0xffff;
+
+	inc_reg(PC, 0);
+
+	switch (cnd) {
+	case 0x1:
+		// JZ
+		if (registers[SR] & SR_Z)
+			shouldjump = true;
+		break;
+	default:
+		unhandled(instr);
+		break;
+	}
+
+	if (shouldjump)
+		registers[PC] = (registers[PC] + offset) & 0xffff;
 }
 
 void

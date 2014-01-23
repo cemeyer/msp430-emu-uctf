@@ -381,6 +381,38 @@ START_TEST(test_cmp_imm_mem)
 }
 END_TEST
 
+START_TEST(test_jmp_z)
+{
+	uint16_t code[] = {
+		// jz $+0x10
+		0x2407,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+}
+END_TEST
+
+START_TEST(test_jmp_z2)
+{
+	uint16_t code[] = {
+		// jz $+0x10
+		0x2407,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = SR_Z;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 0x10);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -413,6 +445,12 @@ suite_instr(void)
 	tcase_add_test(tcmp, test_cmp_imm_reg);
 	tcase_add_test(tcmp, test_cmp_imm_mem);
 	suite_add_tcase(s, tcmp);
+
+	TCase *tjmp = tcase_create("jmp");
+	tcase_add_checked_fixture(tjmp, setup_machine, teardown_machine);
+	tcase_add_test(tjmp, test_jmp_z);
+	tcase_add_test(tjmp, test_jmp_z2);
+	suite_add_tcase(s, tjmp);
 
 	return s;
 }
