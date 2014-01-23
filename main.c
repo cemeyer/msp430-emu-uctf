@@ -27,7 +27,6 @@ init(void)
 	insns = 0;
 	start = now();
 	memset(memory, 0, sizeof(memory));
-	memwriteword(0x10, 0x4130); // callgate
 	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
 	ASSERT(memory_taint, "g_hash");
 
@@ -76,8 +75,7 @@ main(int argc, char **argv)
 		idx += rd;
 	}
 	printf("Loaded %zu words from image.\n", idx/2);
-	ASSERT(memword(0x10) == 0x4130, "No callgate at 0x10??: Instead: %04x",
-	    memword(0x10));
+	memwriteword(0x10, 0x4130); // callgate
 
 	fclose(romfile);
 
