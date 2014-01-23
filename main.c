@@ -104,6 +104,16 @@ emulate1(void)
 
 	instr = memword(registers[PC]);
 
+	// dec r15; jnz -2 busy loop
+	if (instr == 0x831f && memword(registers[PC]+2) == 0x23fe) {
+		insns += (2ul * registers[15]) + 1;
+		registers[15] = 0;
+		registers[SR] &= ~(SR_C | SR_N | SR_V);
+		registers[SR] |= SR_Z;
+		registers[PC] += 4;
+		goto out;
+	}
+
 	switch (bits(instr, 15, 13)) {
 	case 0:
 		handle_single(instr);
@@ -116,6 +126,7 @@ emulate1(void)
 		break;
 	}
 
+out:
 	insns++;
 }
 
@@ -877,6 +888,7 @@ abort_nodump(void)
 
 	print_regs();
 	print_ips();
+	abort();
 	exit(1);
 }
 
@@ -1040,6 +1052,7 @@ addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 
 	// #uctf never sets V. Only clear on arithmetic, though.
 	*clr |= SR_V;
+	*clr |= 0xfe00;
 #if 0
 	if ((res & 0x8000) ^ (orig & 0x8000))
 		*set |= SR_V;
@@ -1062,6 +1075,7 @@ andflags(uint16_t res, uint16_t *set, uint16_t *clr)
 {
 
 	*clr |= SR_V;
+	*clr |= 0xfe00;
 
 	if (res & 0x8000)
 		*set |= SR_N;

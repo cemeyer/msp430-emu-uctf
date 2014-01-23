@@ -600,6 +600,7 @@ START_TEST(test_add_imm_reg)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = 0xffef;
 	registers[5] = 0xffff;
 
 	emulate1();
@@ -607,6 +608,8 @@ START_TEST(test_add_imm_reg)
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0);
 	ck_assert_flags(SR_C | SR_Z);
+	// arithmetic instructions clear upper byte of SR
+	ck_assert(registers[SR] == 0x00eb);
 }
 END_TEST
 
@@ -1362,6 +1365,28 @@ START_TEST(test_rrab)
 }
 END_TEST
 
+START_TEST(test_adc_indpc)
+{
+	uint16_t code[] = {
+		0x6380,		// addc #0, 2(pc)
+		0x0002,
+		0x4444,
+		0x6666,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = SR_C;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(memword(CODE_STEP + 2) == 0x2);
+	ck_assert(memword(CODE_STEP + 4) == 0x4444);
+	ck_assert(memword(CODE_STEP + 6) == 0x6667);
+	ck_assert_flags(0);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1427,6 +1452,7 @@ suite_instr(void)
 	tcase_add_test(tadd, test_addb_reg_reg);
 	tcase_add_test(tadd, test_addc);
 	tcase_add_test(tadd, test_addcb);
+	tcase_add_test(tadd, test_adc_indpc);
 	suite_add_tcase(s, tadd);
 
 	TCase *tcall = tcase_create("call");
