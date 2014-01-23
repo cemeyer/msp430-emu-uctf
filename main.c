@@ -187,6 +187,10 @@ handle_jump(uint16_t instr)
 		if (registers[SR] & SR_Z)
 			shouldjump = true;
 		break;
+	case 0x7:
+		// JMP
+		shouldjump = true;
+		break;
 	default:
 		unhandled(instr);
 		break;
