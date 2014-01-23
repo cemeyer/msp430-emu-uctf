@@ -19,6 +19,12 @@ struct taint {
 	uint16_t	addrs[0];
 };
 
+enum taint_apply {
+	t_copy,
+	t_ignore,
+	t_add,
+};
+
 extern uint16_t		 pc_start;
 extern uint16_t		 registers[16];
 extern uint8_t		 memory[0x10000];
@@ -78,10 +84,12 @@ void		 destroy(void);
 void		 emulate(void);
 void		 emulate1(void);
 uint16_t	 memword(uint16_t addr);
+void		 memwriteword(uint16_t addr, uint16_t word);
 void		 mem2reg(uint16_t addr, unsigned reg);
 void		 reg2mem(unsigned reg, uint16_t addr);
 uint16_t	 bits(uint16_t v, unsigned max, unsigned min);
 void		 copytaint(struct taint **dest, const struct taint *src);
+void		 copytaintmem(uint16_t addr, const struct taint *src);
 void		 unhandled(uint16_t instr);
 void		 illins(uint16_t instr);
 struct taint	*newtaint(void);
@@ -89,6 +97,7 @@ void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
 void		 taint_mem(uint16_t addr);
 void		 addtaint(struct taint **dst, struct taint *src);
+void		 addtaintmem(uint16_t addr, struct taint *src);
 bool		 regtainted(uint16_t reg, uint16_t addr);
 bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 uint16_t	 sr_flags(void);

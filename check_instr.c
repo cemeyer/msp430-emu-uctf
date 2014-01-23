@@ -10,6 +10,9 @@
 #define ck_assert_taints(reg, args...) \
     _ck_assert_taints(reg, args, 0x10000)
 
+#define ck_assert_taint_mem(addr, args...) \
+    _ck_assert_taint_mem(addr, args, 0x10000)
+
 void
 install_words_le(uint16_t *code, uint16_t addr, size_t sz)
 {
@@ -93,6 +96,50 @@ _ck_assert_taints(uint16_t reg, ...)
 		    " %s.\n", reg, rtaints, staints);
 }
 
+void
+_ck_assert_taint_mem(uint16_t daddr, ...)
+{
+	struct taint *mt;
+	char staints[600],
+	     rtaints[600];
+	unsigned n = 0, addr;
+	va_list ap;
+
+	mt = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(daddr));
+
+	strcpy(staints, "<");
+	strcpy(rtaints, "<");
+
+	for (unsigned i = 0; mt && i < mt->ntaints; i++)
+		sprintf(&staints[strlen(staints)], "%#04x,", mt->addrs[i]);
+	strcat(staints, ">");
+
+	va_start(ap, daddr);
+	while ((addr = va_arg(ap, unsigned)) != 0x10000) {
+		bool found = false;
+
+		sprintf(&rtaints[strlen(rtaints)], "%#04x,", addr);
+
+		for (unsigned i = 0; mt && i < mt->ntaints; i++) {
+			if (mt->addrs[i] == addr) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			ck_abort_msg("%#04x: %#04x not found (taints: %s)\n",
+			    daddr, addr, staints);
+		n++;
+	}
+	va_end(ap);
+
+	strcat(rtaints, ">");
+
+	if (mt && n != mt->ntaints)
+		ck_abort_msg("%#04x: More tainted than expected. Exp: %s,"
+		    " Act: %s.\n", daddr, rtaints, staints);
+}
+
 // mov #4400, sp
 START_TEST(test_mov_const_reg)
 {
@@ -130,6 +177,29 @@ START_TEST(test_mov_sr_abs_reg)
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0x1234);
 	ck_assert(regtaintedexcl(5, 0x1000));
+}
+END_TEST
+
+// mov @r15+, #-0x1002(r15)
+START_TEST(test_mov_pre_incr)
+{
+	uint16_t code[] = {
+		0x4fbf,
+		0xeffe,
+	};
+	uint16_t word = 0x1234;
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	install_words_le(&word, 0x2400, sizeof(word));
+	taint_mem(0x2400);
+	registers[15] = 0x2400;
+
+	emulate1();
+
+	ck_assert(memword(0x1400) == word);
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert_msg(registers[15] == 0x2402);
+	ck_assert_taint_mem(0x1400, 0x2400);
 }
 END_TEST
 
@@ -261,6 +331,7 @@ suite_instr(void)
 	tcase_add_checked_fixture(tmov, setup_machine, teardown_machine);
 	tcase_add_test(tmov, test_mov_const_reg);
 	tcase_add_test(tmov, test_mov_sr_abs_reg);
+	tcase_add_test(tmov, test_mov_pre_incr);
 	suite_add_tcase(s, tmov);
 
 	TCase *tand = tcase_create("and");

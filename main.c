@@ -147,16 +147,20 @@ void
 handle_double(uint16_t instr)
 {
 	enum operand_kind srckind, dstkind;
+	struct taint *taintsrc = NULL;
 	uint16_t dsrc = bits(instr, 11, 8) >> 8,
 		 Ad = bits(instr, 7, 7),
 		 bw = bits(instr, 6, 6),
 		 As = bits(instr, 5, 4),
 		 ddst = bits(instr, 3, 0);
 	uint16_t srcval /*absolute addr or register number or constant*/,
-		 dstval /*absolute addr or register number*/;
+		 dstval /*absolute addr or register number*/,
+		 srcnum /*as a number*/,
+		 dstnum;
 	unsigned res = 0x10000;
 	uint16_t setflags = 0,
 		 clrflags = SR_V /* per #uctf emu */;
+	enum taint_apply ta = t_ignore;
 
 	inc_reg(PC, 0);
 
@@ -165,90 +169,79 @@ handle_double(uint16_t instr)
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 	load_dst(instr, ddst, Ad, &dstval, &dstkind);
 
+	// Load addressed src values
+	switch (srckind) {
+	case OP_REG:
+		taintsrc = register_taint[srcval];
+		srcnum = registers[srcval];
+		if (bw)
+			srcnum &= 0xff;
+		break;
+	case OP_MEM:
+		taintsrc = g_hash_table_lookup(memory_taint,
+		    GINT_TO_POINTER(srcval & 0xfffe));
+		if (bw)
+			srcnum = memory[srcval];
+		else
+			srcnum = memword(srcval);
+		break;
+	case OP_CONST:
+		srcnum = srcval;
+		if (bw)
+			srcnum &= 0xff;
+		break;
+	default:
+		ASSERT(false, "illins");
+		break;
+	}
+
+	// Load addressed dst values
+	switch (dstkind) {
+	case OP_REG:
+		dstnum = registers[dstval];
+		if (bw)
+			dstnum &= 0xff;
+		break;
+	case OP_MEM:
+		if (bw)
+			dstnum = memory[dstval];
+		else
+			dstnum = memword(dstval);
+		break;
+	default:
+		ASSERT(false, "illins");
+		break;
+	}
+
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
-		//printf("DDD MOV(src:%x, dst: %x, as:%x, ad:%x, b/w:%x)\n",
-		//    (uns)dsrc, (uns)ddst, (uns)As, (uns)Ad, (uns)bw);
-
-		if (dstkind == OP_REG) {
-			if (srckind == OP_MEM) {
-				printf("DDD MOV @%#04x (%#04x), r%d\n",
-				    (uns)srcval, (uns)memword(srcval),
-				    (uns)dstval);
-				res = memword(srcval);
-				copytaint(&register_taint[dstval],
-				    g_hash_table_lookup(memory_taint,
-					GINT_TO_POINTER(srcval)));
-			} else
-				unhandled(instr);
-		} else if (dstkind == OP_MEM) {
-			if (bw) {
-			} else {
-				ASSERT((dstval & 0x1) == 0, "word store "
-				    "unaligned: %#04x", (unsigned)dstval);
-			}
-
-			unhandled(instr);
-		} else
-			unhandled(instr);
-
+		ta = t_copy;
+		res = srcnum;
 		break;
 	case 0xd000:
 		// BIS (no flags)
-		if (dstkind == OP_REG) {
-			if (srckind == OP_MEM) {
-				printf("DDD BIS @%#04x (%#04x), r%d\n",
-				    (uns)srcval, (uns)memword(srcval),
-				    (uns)dstval);
-				addtaint(&register_taint[dstval],
-				    g_hash_table_lookup(memory_taint,
-					GINT_TO_POINTER(srcval)));
-
-				res = (registers[dstval] | memword(srcval));
-			} else
-				unhandled(instr);
-		} else
-			unhandled(instr);
+		ta = t_add;
+		res = dstnum | srcnum;
 		break;
 	case 0xf000:
 		// AND
-		if (dstkind == OP_REG) {
-			if (srckind == OP_CONST) {
-				printf("DDD AND #%#04x, r%d\n", (uns)srcval,
-				    (uns)dstval);
+		ta = t_add;
+		res = dstnum & srcnum;
+		if (bw)
+			res &= 0x00ff;
 
-				res = registers[dstval] & srcval;
-			} else if (srckind == OP_MEM) {
-				printf("DDD AND @#%#04x (%#04x), r%d\n",
-				    (uns)srcval, (uns)memword(srcval),
-				    (uns)dstval);
-
-				addtaint(&register_taint[dstval],
-				    g_hash_table_lookup(memory_taint,
-					GINT_TO_POINTER(srcval)));
-				res = registers[dstval] & memword(srcval);
-			} else {
-				ASSERT(srckind == OP_REG, "enum invalid");
-				unhandled(instr);
-			}
-
-			if (bw)
-				res &= 0x00ff;
-
-			if (res & 0x8000)
-				setflags |= SR_N;
-			else
-				clrflags |= SR_N;
-			if (res == 0) {
-				setflags |= SR_Z;
-				clrflags |= SR_C;
-			} else {
-				clrflags |= SR_Z;
-				setflags |= SR_C;
-			}
-		} else
-			unhandled(instr);
+		if (res & 0x8000)
+			setflags |= SR_N;
+		else
+			clrflags |= SR_N;
+		if (res == 0) {
+			setflags |= SR_Z;
+			clrflags |= SR_C;
+		} else {
+			clrflags |= SR_Z;
+			setflags |= SR_C;
+		}
 		break;
 	default:
 		unhandled(instr);
@@ -266,6 +259,22 @@ handle_double(uint16_t instr)
 			res &= 0x00ff;
 
 		registers[dstval] = res & 0xffff;
+		if (ta == t_add)
+			addtaint(&register_taint[dstval], taintsrc);
+		else if (ta == t_copy)
+			copytaint(&register_taint[dstval], taintsrc);
+	} else if (dstkind == OP_MEM) {
+		if (bw) {
+			if (ta == t_copy)
+				ta = t_add;
+			memory[dstval] = res & 0xff;
+		} else
+			memwriteword(dstval, res);
+
+		if (ta == t_add)
+			addtaintmem(dstval & 0xfffe, taintsrc);
+		else if (ta == t_copy)
+			copytaintmem(dstval, taintsrc);
 	}
 }
 
@@ -478,6 +487,25 @@ copytaint(struct taint **dest, const struct taint *src)
 }
 
 void
+copytaintmem(uint16_t addr, const struct taint *src)
+{
+	struct taint *mt;
+	size_t tsize;
+
+	g_hash_table_remove(memory_taint, GINT_TO_POINTER(addr));
+
+	if (src == NULL || src->ntaints == 0)
+		return;
+
+	tsize = sizeof(struct taint) + (src->ntaints * sizeof(uint16_t));
+	mt = malloc(tsize);
+	ASSERT(mt, "oom");
+	memcpy(mt, src, tsize);
+
+	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
+}
+
+void
 abort_nodump(void)
 {
 
@@ -560,9 +588,65 @@ addtaint(struct taint **dst, struct taint *src)
 	}
 }
 
+void
+addtaintmem(uint16_t addr, struct taint *src)
+{
+	unsigned total = 0;
+	struct taint *mt;
+
+	ASSERT((addr & 1) == 0, "aligned");
+
+	if (src == NULL)
+		return;
+
+	if (src->ntaints == 0)
+		return;
+
+	mt = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(addr));
+	if (mt) {
+		g_hash_table_remove(memory_taint, GINT_TO_POINTER(addr));
+		total = mt->ntaints;
+	} else
+		mt = newtaint();
+
+	total += src->ntaints;
+	mt = realloc(mt, sizeof(*mt) + total*sizeof(uint16_t));
+	ASSERT(mt, "oom");
+
+	for (unsigned i = 0; i < src->ntaints; i++) {
+		uint16_t taddr = src->addrs[i];
+		bool dupe = false;
+
+		for (unsigned j = 0; j < mt->ntaints; j++) {
+			if (mt->addrs[j] == taddr) {
+				dupe = true;
+				break;
+			}
+		}
+
+		if (!dupe) {
+			mt->addrs[mt->ntaints] = taddr;
+			mt->ntaints += 1;
+		}
+	}
+
+	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
+}
+
+
 uint16_t
 sr_flags(void)
 {
 
 	return registers[SR] & (SR_V | SR_CPUOFF | SR_N | SR_Z | SR_C);
+}
+
+void
+memwriteword(uint16_t addr, uint16_t word)
+{
+
+	ASSERT((addr & 0x1) == 0, "word store unaligned: %#04x",
+	    (uns)addr);
+	memory[addr] = word & 0xff;
+	memory[addr+1] = (word >> 8) & 0xff;
 }
