@@ -1048,6 +1048,114 @@ START_TEST(test_rrcb)
 }
 END_TEST
 
+START_TEST(test_dadd)
+{
+	uint16_t code[] = {
+		0xa405,		// dadd r4, r5
+	};
+
+	uint16_t initial[] = {
+		0x160e, 0x04a2,
+		0x0845, 0x3c01,
+		0x3c01, 0x0f51,
+		0xf, 0xf,
+		0xb000, 0x0185,
+	};
+	uint16_t initflags[] = {
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z,
+	};
+	uint16_t result[] = {
+		0x2116,
+		0x4a46,
+		0x4152,
+		0x0014,
+		0x1185,
+	};
+	uint16_t rflags[] = {
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(result); i++) {
+		registers[4] = initial[2*i];
+		registers[5] = initial[2*i+1];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[4] == initial[2*i]);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
+START_TEST(test_daddb)
+{
+	uint16_t code[] = {
+		0xa445,		// dadd.b r4, r5
+	};
+
+	uint16_t initial[] = {
+		0x0e, 0xa2,
+		0x45, 0x01,
+		0x01, 0x51,
+		0x0f, 0x0f,
+		0xb0, 0x05,
+	};
+	uint16_t initflags[] = {
+		SR_C|SR_Z,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+		SR_C|SR_Z,
+	};
+	uint16_t result[] = {
+		0x16,
+		0x46,
+		0x52,
+		0x14,
+		0x15,
+	};
+	uint16_t rflags[] = {
+		SR_C|SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_Z|SR_N,
+		SR_C|SR_Z|SR_N,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+
+	for (unsigned i = 0; i < ARRAYLEN(result); i++) {
+		registers[4] = initial[2*i];
+		registers[5] = initial[2*i+1];
+		registers[SR] = initflags[i];
+
+		emulate1();
+
+		ck_assert(registers[PC] == CODE_STEP + 2);
+		ck_assert(registers[4] == initial[2*i]);
+		ck_assert(registers[5] == result[i]);
+		ck_assert_flags(rflags[i]);
+
+		registers[PC] = CODE_STEP;
+	}
+}
+END_TEST
+
 
 Suite *
 suite_instr(void)
@@ -1154,6 +1262,12 @@ suite_instr(void)
 	tcase_add_test(trrc, test_rrc);
 	tcase_add_test(trrc, test_rrcb);
 	suite_add_tcase(s, trrc);
+
+	TCase *tdadd = tcase_create("dadd");
+	tcase_add_checked_fixture(tdadd, setup_machine, teardown_machine);
+	tcase_add_test(tdadd, test_dadd);
+	tcase_add_test(tdadd, test_daddb);
+	suite_add_tcase(s, tdadd);
 
 	return s;
 }

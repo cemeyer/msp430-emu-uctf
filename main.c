@@ -487,6 +487,36 @@ handle_double(uint16_t instr)
 		else
 			res &= 0xffff;
 		break;
+	case 0xa000:
+		// DADD (flags)
+		{
+		unsigned carry = 0;
+		bool setn = false;
+
+		res = 0;
+		for (unsigned i = 0; i < ((bw)? 8 : 16); i += 4) {
+			unsigned a = bits(srcnum, i+3, i) >> i,
+				 b = bits(dstnum, i+3, i) >> i,
+				 partial;
+			partial = a + b + carry;
+			setn = !!(partial & 0x8);
+			if (partial >= 10) {
+				partial -= 10;
+				carry = 1;
+			} else
+				carry = 0;
+
+			res |= ((partial & 0xf) << i);
+		}
+
+		if (setn)
+			setflags |= SR_N;
+		if (carry)
+			setflags |= SR_C;
+		else
+			clrflags |= SR_C;
+		}
+		break;
 	case 0xd000:
 		// BIS (no flags)
 		ta = t_add;
