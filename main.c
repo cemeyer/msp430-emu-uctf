@@ -327,10 +327,9 @@ handle_double(uint16_t instr)
 		 As = bits(instr, 5, 4),
 		 ddst = bits(instr, 3, 0);
 	uint16_t srcval /*absolute addr or register number or constant*/,
-		 dstval /*absolute addr or register number*/,
-		 srcnum /*as a number*/,
-		 dstnum;
-	unsigned res = 0x10000;
+		 dstval /*absolute addr or register number*/;
+	unsigned res = (unsigned)-1,
+		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = SR_V /* per #uctf emu */;
 	enum taint_apply ta = t_ignore;
@@ -389,20 +388,46 @@ handle_double(uint16_t instr)
 	case 0x5000:
 		// ADD (flags)
 		ta = t_add;
-		res = (dstnum + srcnum) & 0xffff;
-		addflags(res, dstnum, &setflags, &clrflags);
+		if (bw) {
+			dstnum &= 0xff;
+			srcnum &= 0xff;
+		}
+		res = dstnum + srcnum;
+		addflags(res, bw, &setflags, &clrflags);
+		if (bw)
+			res &= 0x00ff;
+		else
+			res &= 0xffff;
 		break;
 	case 0x8000:
 		// SUB (flags)
 		ta = t_add;
-		res = (dstnum - srcnum) & 0xffff;
-		subflags(res, dstnum, &setflags, &clrflags);
+		srcnum = ~srcnum & 0xffff;
+		if (bw) {
+			dstnum &= 0xff;
+			srcnum &= 0xff;
+		}
+		res = dstnum + srcnum + 1;
+		addflags(res, bw, &setflags, &clrflags);
+		if (bw)
+			res &= 0x00ff;
+		else
+			res &= 0xffff;
 		break;
 	case 0x9000:
 		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
-		res = (dstnum - srcnum) & 0xffff;
-		subflags(res, dstnum, &setflags, &clrflags);
+		srcnum = ~srcnum & 0xffff;
+		if (bw) {
+			dstnum &= 0xff;
+			srcnum &= 0xff;
+		}
+		res = dstnum + srcnum + 1;
+		addflags(res, bw, &setflags, &clrflags);
+		if (bw)
+			res &= 0x00ff;
+		else
+			res &= 0xffff;
 		break;
 	case 0xd000:
 		// BIS (no flags)
@@ -427,7 +452,7 @@ handle_double(uint16_t instr)
 	registers[SR] &= ~clrflags;
 
 	if (dstkind == OP_REG) {
-		ASSERT(res != 0x10000, "res never set");
+		ASSERT(res != (unsigned)-1, "res never set");
 
 		if (bw)
 			res &= 0x00ff;
@@ -893,9 +918,14 @@ subflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
 }
 
 void
-addflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
+addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 {
-	if (res & 0x8000)
+	unsigned sz = 16;
+
+	if (bw)
+		sz = 8;
+
+	if (bw == 0 && (res & 0x8000))
 		*set |= SR_N;
 	else
 		*clr |= SR_N;
@@ -906,12 +936,12 @@ addflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
 		*set |= SR_V;
 #endif
 
-	if (res == 0)
+	if ((res & ((1 << sz) - 1)) == 0)
 		*set |= SR_Z;
 	else
 		*clr |= SR_Z;
 
-	if (res < orig)
+	if (res & (1 << sz))
 		*set |= SR_C;
 	else
 		*clr |= SR_C;

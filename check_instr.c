@@ -13,6 +13,8 @@
 #define ck_assert_taint_mem(addr, args...) \
     _ck_assert_taint_mem(addr, args, 0x10000)
 
+#define ck_assert_flags(flags) _ck_assert_flags(__LINE__, flags)
+
 void
 install_words_le(uint16_t *code, uint16_t addr, size_t sz)
 {
@@ -138,6 +140,16 @@ _ck_assert_taint_mem(uint16_t daddr, ...)
 	if (mt && n != mt->ntaints)
 		ck_abort_msg("%#04x: More tainted than expected. Exp: %s,"
 		    " Act: %s.\n", daddr, rtaints, staints);
+}
+
+static void
+_ck_assert_flags(unsigned line, uint16_t exp)
+{
+	uint16_t actual = sr_flags();
+
+	ck_assert_msg(actual == exp,
+	    "l%u: expected flags: %#04x; actual: %#04x (diff: %#04x)", line,
+	    exp, actual, exp ^ actual);
 }
 
 // mov #4400, sp
@@ -355,7 +367,7 @@ START_TEST(test_cmp_const_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 2);
 	ck_assert(registers[5] == 0);
-	ck_assert_msg(sr_flags() == SR_Z, "sr_flags: %#04x", sr_flags());
+	ck_assert_flags(SR_C | SR_Z);
 }
 END_TEST
 
@@ -374,8 +386,7 @@ START_TEST(test_cmp_imm_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0);
-	ck_assert_msg(sr_flags() == (SR_N | SR_C), "sr_flags: %#04x",
-	    sr_flags());
+	ck_assert_flags(SR_N);
 }
 END_TEST
 
@@ -396,7 +407,27 @@ START_TEST(test_cmp_imm_mem)
 
 	ck_assert(registers[PC] == CODE_STEP + 6);
 	ck_assert(registers[5] == 0x2400);
-	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x", sr_flags());
+	ck_assert_flags(SR_C);
+}
+END_TEST
+
+START_TEST(test_cmpb_reg_reg)
+{
+	uint16_t code[] = {
+		// cmp.b r4, r5
+		0x9445,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[4] = 0xff;
+	registers[5] = 0x2080;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[4] == 0xff);
+	ck_assert(registers[5] == 0x2080);
+	ck_assert_flags(0);
 }
 END_TEST
 
@@ -495,25 +526,6 @@ START_TEST(test_jmp2)
 }
 END_TEST
 
-START_TEST(test_sub_const_reg)
-{
-	uint16_t code[] = {
-		// dec r15   (aka: sub #1, r15)
-		0x831f,
-	};
-
-	install_words_le(code, CODE_STEP, sizeof(code));
-	registers[15] = 0;
-
-	emulate1();
-
-	ck_assert(registers[PC] == CODE_STEP + 2);
-	ck_assert(registers[15] == 0xffff);
-	ck_assert_msg(sr_flags() == (SR_C | SR_N), "sr_flags: %#04x",
-	    sr_flags());
-}
-END_TEST
-
 START_TEST(test_add_imm_reg)
 {
 	uint16_t code[] = {
@@ -528,15 +540,14 @@ START_TEST(test_add_imm_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0);
-	ck_assert_msg(sr_flags() == (SR_C | SR_Z), "sr_flags: %#04x",
-	    sr_flags());
+	ck_assert_flags(SR_C | SR_Z);
 }
 END_TEST
 
 START_TEST(test_addb_imm_reg)
 {
 	uint16_t code[] = {
-		0x5075,		// add imm, r5
+		0x5075,		// add.b imm, r5
 		0xbeef,
 	};
 
@@ -547,8 +558,43 @@ START_TEST(test_addb_imm_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0xee);
-	ck_assert_msg(sr_flags() == SR_C, "sr_flags: %#04x",
-	    sr_flags());
+	ck_assert_flags(SR_C);
+}
+END_TEST
+
+START_TEST(test_addb_reg_reg)
+{
+	uint16_t code[] = {
+		0x5445,		// add.b r4, r5
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[4] = 0x8010;
+	registers[5] = 0x20f0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0);
+	ck_assert_flags(SR_C | SR_Z);
+}
+END_TEST
+
+START_TEST(test_sub_const_reg)
+{
+	uint16_t code[] = {
+		// dec r15   (aka: sub #1, r15)
+		0x831f,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[15] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[15] == 0xffff);
+	ck_assert_flags(SR_N);
 }
 END_TEST
 
@@ -567,8 +613,7 @@ START_TEST(test_sub_imm_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 5);
-	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x",
-	    sr_flags());
+	ck_assert_flags(SR_C);
 
 	registers[PC] = CODE_STEP;
 
@@ -576,7 +621,7 @@ START_TEST(test_sub_imm_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0);
-	ck_assert_msg(sr_flags() == SR_Z, "sr_flags: %#04x", sr_flags());
+	ck_assert_flags(SR_Z | SR_C);
 }
 END_TEST
 
@@ -597,8 +642,48 @@ START_TEST(test_sub_imm_mem)
 
 	ck_assert(registers[PC] == CODE_STEP + 6);
 	ck_assert(registers[5] == 0x2401);
-	ck_assert_msg(sr_flags() == 0, "sr_flags: %#04x", sr_flags());
+	ck_assert_flags(SR_C);
 	ck_assert(memword(0x2416) == 0x00fb);
+}
+END_TEST
+
+START_TEST(test_subb_reg_reg)
+{
+	uint16_t code[] = {
+		// sub.b r4, r5
+		0x8445,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[4] = 0x0025;
+	registers[5] = 0xf00f;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0x00ea);
+	ck_assert(registers[4] == 0x0025);
+	ck_assert_flags(0);
+}
+END_TEST
+
+START_TEST(test_subb_reg_reg2)
+{
+	uint16_t code[] = {
+		// sub.b r4, r5
+		0x8445,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[4] = 0xf;
+	registers[5] = 0xf00f;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0);
+	ck_assert(registers[4] == 0xf);
+	ck_assert_flags(SR_C | SR_Z);
 }
 END_TEST
 
@@ -713,7 +798,7 @@ START_TEST(test_sxt_reg)
 
 	ck_assert(registers[PC] == CODE_STEP + 2);
 	ck_assert(registers[15] == 0xff80);
-	ck_assert(sr_flags() == (SR_C | SR_N));
+	ck_assert_flags(SR_C | SR_N);
 }
 END_TEST
 
@@ -730,7 +815,7 @@ START_TEST(test_sxt_reg2)
 
 	ck_assert(registers[PC] == CODE_STEP + 2);
 	ck_assert(registers[15] == 0x007f);
-	ck_assert(sr_flags() == SR_C);
+	ck_assert_flags(SR_C);
 }
 END_TEST
 
@@ -747,7 +832,7 @@ START_TEST(test_sxt_reg3)
 
 	ck_assert(registers[PC] == CODE_STEP + 2);
 	ck_assert(registers[15] == 0);
-	ck_assert(sr_flags() == SR_Z);
+	ck_assert_flags(SR_Z);
 }
 END_TEST
 
@@ -783,6 +868,7 @@ suite_instr(void)
 	tcase_add_test(tcmp, test_cmp_const_reg);
 	tcase_add_test(tcmp, test_cmp_imm_reg);
 	tcase_add_test(tcmp, test_cmp_imm_mem);
+	tcase_add_test(tcmp, test_cmpb_reg_reg);
 	suite_add_tcase(s, tcmp);
 
 	TCase *tjmp = tcase_create("jmp");
@@ -800,12 +886,15 @@ suite_instr(void)
 	tcase_add_test(tsub, test_sub_const_reg);
 	tcase_add_test(tsub, test_sub_imm_reg);
 	tcase_add_test(tsub, test_sub_imm_mem);
+	tcase_add_test(tsub, test_subb_reg_reg);
+	tcase_add_test(tsub, test_subb_reg_reg2);
 	suite_add_tcase(s, tsub);
 
 	TCase *tadd = tcase_create("add");
 	tcase_add_checked_fixture(tadd, setup_machine, teardown_machine);
 	tcase_add_test(tadd, test_add_imm_reg);
 	tcase_add_test(tadd, test_addb_imm_reg);
+	tcase_add_test(tadd, test_addb_reg_reg);
 	suite_add_tcase(s, tadd);
 
 	TCase *tcall = tcase_create("call");

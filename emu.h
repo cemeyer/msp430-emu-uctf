@@ -107,9 +107,7 @@ void		 addtaintmem(uint16_t addr, struct taint *src);
 bool		 regtainted(uint16_t reg, uint16_t addr);
 bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 uint16_t	 sr_flags(void);
-void		 addflags(uint16_t res, uint16_t orig, uint16_t *set,
-			  uint16_t *clr);
-void		 subflags(uint16_t res, uint16_t orig, uint16_t *set,
+void		 addflags(unsigned res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
 void		 andflags(uint16_t res, uint16_t *set, uint16_t *clr);
 uint64_t	 now(void);	// microseconds
