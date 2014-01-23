@@ -248,16 +248,22 @@ handle_double(uint16_t instr)
 		ta = t_copy;
 		res = srcnum;
 		break;
-	case 0x8000:
-		// SUB
+	case 0x5000:
+		// ADD (flags)
 		ta = t_add;
-		res = dstnum - srcnum;
+		res = (dstnum + srcnum) & 0xffff;
+		addflags(res, dstnum, &setflags, &clrflags);
+		break;
+	case 0x8000:
+		// SUB (flags)
+		ta = t_add;
+		res = (dstnum - srcnum) & 0xffff;
 		subflags(res, dstnum, &setflags, &clrflags);
 		break;
 	case 0x9000:
-		// CMP
+		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
-		res = dstnum - srcnum;
+		res = (dstnum - srcnum) & 0xffff;
 		subflags(res, dstnum, &setflags, &clrflags);
 		break;
 	case 0xd000:
@@ -266,7 +272,7 @@ handle_double(uint16_t instr)
 		res = dstnum | srcnum;
 		break;
 	case 0xf000:
-		// AND
+		// AND (flags)
 		ta = t_add;
 		res = dstnum & srcnum;
 		if (bw)
@@ -753,6 +759,31 @@ subflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
 		*clr |= SR_Z;
 
 	if (res > orig)
+		*set |= SR_C;
+	else
+		*clr |= SR_C;
+}
+
+void
+addflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
+{
+	if (res & 0x8000)
+		*set |= SR_N;
+	else
+		*clr |= SR_N;
+
+	// #uctf never sets V
+#if 0
+	if ((res & 0x8000) ^ (orig & 0x8000))
+		*set |= SR_V;
+#endif
+
+	if (res == 0)
+		*set |= SR_Z;
+	else
+		*clr |= SR_Z;
+
+	if (res < orig)
 		*set |= SR_C;
 	else
 		*clr |= SR_C;
