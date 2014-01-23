@@ -218,7 +218,7 @@ handle_single(uint16_t instr)
 	struct taint *taintsrc = NULL;
 	unsigned res = 0x10000;
 	uint16_t setflags = 0,
-		 clrflags = SR_V /* per #uctf emu */;
+		 clrflags = 0;
 	enum taint_apply ta = t_ignore;
 
 	inc_reg(PC, 0);
@@ -343,7 +343,7 @@ handle_double(uint16_t instr)
 	unsigned res = (unsigned)-1,
 		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
-		 clrflags = SR_V /* per #uctf emu */;
+		 clrflags = 0;
 	enum taint_apply ta = t_ignore;
 
 	inc_reg(PC, 0);
@@ -910,32 +910,6 @@ memwriteword(uint16_t addr, uint16_t word)
 	memory[addr+1] = (word >> 8) & 0xff;
 }
 
-// Set flags after a subtraction, resulting in res.
-void
-subflags(uint16_t res, uint16_t orig, uint16_t *set, uint16_t *clr)
-{
-	if (res & 0x8000)
-		*set |= SR_N;
-	else
-		*clr |= SR_N;
-
-	// #uctf never sets V
-#if 0
-	if ((res & 0x8000) ^ (orig & 0x8000))
-		*set |= SR_V;
-#endif
-
-	if (res == 0)
-		*set |= SR_Z;
-	else
-		*clr |= SR_Z;
-
-	if (res > orig)
-		*set |= SR_C;
-	else
-		*clr |= SR_C;
-}
-
 void
 addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 {
@@ -949,7 +923,8 @@ addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 	else
 		*clr |= SR_N;
 
-	// #uctf never sets V
+	// #uctf never sets V. Only clear on arithmetic, though.
+	*clr |= SR_V;
 #if 0
 	if ((res & 0x8000) ^ (orig & 0x8000))
 		*set |= SR_V;
@@ -1044,8 +1019,19 @@ callgate(unsigned op)
 		memory[getsaddr + bufsz - 1] = 0;
 		free(buf);
 		break;
+	case 0x7f:
+		win();
+		break;
 	default:
 		unhandled(0x4130);
 		break;
 	}
+}
+
+void
+win(void)
+{
+
+	printf("The lock opens; you win!\n");
+	exit(0);
 }

@@ -84,6 +84,7 @@ typedef unsigned int uns;
 void		 abort_nodump(void);
 void		 init(void);
 void		 callgate(unsigned op);
+void		 win(void);
 void		 destroy(void);
 void		 emulate(void);
 void		 emulate1(void);
