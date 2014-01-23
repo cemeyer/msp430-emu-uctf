@@ -7,6 +7,9 @@
 #define PC_LOAD     (0xfffe)
 #define CALL_GATE   (0x0010)
 
+#define ck_assert_taints(reg, args...) \
+    _ck_assert_taints(reg, args, 0x10000)
+
 void
 install_words_le(uint16_t *code, uint16_t addr, size_t sz)
 {
@@ -28,7 +31,8 @@ setup_machine(void)
 	uint16_t ret = 0x4130,
 		 run = CODE_REPEAT;
 
-	memset(memory, 0, sizeof(memory));
+	// zero regs/mem, clear taints
+	init();
 
 	// Setup callgate (ret)
 	install_words_le(&ret, CALL_GATE, sizeof(ret));
@@ -38,8 +42,6 @@ setup_machine(void)
 
 	// Setup intitial PC for single-step emu
 	registers[PC] = CODE_STEP;
-
-	init();
 }
 
 void
@@ -47,6 +49,48 @@ teardown_machine(void)
 {
 
 	destroy();
+}
+
+void
+_ck_assert_taints(uint16_t reg, ...)
+{
+	struct taint *rt = register_taint[reg];
+	char staints[600],
+	     rtaints[600];
+	unsigned n = 0, addr;
+	va_list ap;
+
+	strcpy(staints, "<");
+	strcpy(rtaints, "<");
+
+	for (unsigned i = 0; i < rt->ntaints; i++)
+		sprintf(&staints[strlen(staints)], "%#04x,", rt->addrs[i]);
+	strcat(staints, ">");
+
+	va_start(ap, reg);
+	while ((addr = va_arg(ap, unsigned)) != 0x10000) {
+		bool found = false;
+
+		sprintf(&rtaints[strlen(rtaints)], "%#04x,", addr);
+
+		for (unsigned i = 0; i < rt->ntaints; i++) {
+			if (rt->addrs[i] == addr) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			ck_abort_msg("r%d: %#04x not found (taints: %s)\n",
+			    reg, addr, staints);
+		n++;
+	}
+	va_end(ap);
+
+	strcat(rtaints, ">");
+
+	if (n != rt->ntaints)
+		ck_abort_msg("r%d: More tainted than expected. Exp: %s, Act:"
+		    " %s.\n", reg, rtaints, staints);
 }
 
 // mov #4400, sp
@@ -89,7 +133,6 @@ START_TEST(test_mov_sr_abs_reg)
 }
 END_TEST
 
-// XXX TODO set flags (clear v, affect nzc)
 // and.b #-1, r5
 START_TEST(test_and_b_cgneg1_reg)
 {
@@ -97,11 +140,70 @@ START_TEST(test_and_b_cgneg1_reg)
 
 	install_words_le(code, CODE_STEP, sizeof(code));
 	registers[5] = 0x8182;
+	registers[SR] = 0xffef;
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 2);
 	ck_assert(registers[5] == 0x0082);
+	ck_assert_msg(sr_flags() == SR_C, "sr_flags: %#04x, not: %#04x",
+	    sr_flags(), SR_C);
+}
+END_TEST
+
+// and #-1, r5 (=-1)
+START_TEST(test_and_flags1)
+{
+	uint16_t code[] = { 0xf335, };
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0xffff;
+	registers[SR] = 0xffef;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0xffff);
+	ck_assert_msg(sr_flags() == (SR_C | SR_N), "sr_flags: %#04x", sr_flags());
+}
+END_TEST
+
+// and #0x7fff, r5 (=-1)
+START_TEST(test_and_flags2)
+{
+	uint16_t code[] = {
+		0xf035,
+		0x7fff,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	taint_mem(CODE_STEP + 2);
+	registers[5] = 0xffff;
+	registers[SR] = 0xffef;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(registers[5] == 0x7fff);
+	ck_assert_msg(sr_flags() == SR_C, "sr_flags: %#04x", sr_flags());
+	ck_assert_taints(5, CODE_STEP + 2);
+}
+END_TEST
+
+// and #0, r5 (=-1)
+START_TEST(test_and_flags3)
+{
+	uint16_t code[] = { 0xf305, };
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[5] = 0xffff;
+	registers[SR] = 0xffef;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert(registers[5] == 0);
+	ck_assert_msg(sr_flags() == SR_Z, "sr_flags: %#04x", sr_flags());
 }
 END_TEST
 
@@ -164,6 +266,9 @@ suite_instr(void)
 	TCase *tand = tcase_create("and");
 	tcase_add_checked_fixture(tand, setup_machine, teardown_machine);
 	tcase_add_test(tand, test_and_b_cgneg1_reg);
+	tcase_add_test(tand, test_and_flags1);
+	tcase_add_test(tand, test_and_flags2);
+	tcase_add_test(tand, test_and_flags3);
 	suite_add_tcase(s, tand);
 
 	TCase *tbis = tcase_create("bis");

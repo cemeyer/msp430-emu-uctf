@@ -10,9 +10,11 @@ void
 init(void)
 {
 
+	memset(memory, 0, sizeof(memory));
 	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
 	ASSERT(memory_taint, "g_hash");
 
+	memset(registers, 0, sizeof registers);
 	for (unsigned reg = 0; reg < 16; reg++)
 		register_taint[reg] = newtaint();
 }
@@ -47,6 +49,8 @@ main(int argc, char **argv)
 	romfile = fopen(argv[1], "rb");
 	ASSERT(romfile, "fopen");
 
+	init();
+
 	idx = 0;
 	while (true) {
 		rd = fread(memory, 1, sizeof(memory) - idx, romfile);
@@ -61,7 +65,6 @@ main(int argc, char **argv)
 	// XXX set memory taints
 	// XXX or just auto-set on getsn()
 
-	init();
 	emulate();
 
 	return 0;
@@ -151,6 +154,9 @@ handle_double(uint16_t instr)
 		 ddst = bits(instr, 3, 0);
 	uint16_t srcval /*absolute addr or register number or constant*/,
 		 dstval /*absolute addr or register number*/;
+	unsigned res = 0x10000;
+	uint16_t setflags = 0,
+		 clrflags = SR_V /* per #uctf emu */;
 
 	inc_reg(PC, 0);
 
@@ -170,7 +176,10 @@ handle_double(uint16_t instr)
 				printf("DDD MOV @%#04x (%#04x), r%d\n",
 				    (uns)srcval, (uns)memword(srcval),
 				    (uns)dstval);
-				mem2reg(srcval, dstval);
+				res = memword(srcval);
+				copytaint(&register_taint[dstval],
+				    g_hash_table_lookup(memory_taint,
+					GINT_TO_POINTER(srcval)));
 			} else
 				unhandled(instr);
 		} else if (dstkind == OP_MEM) {
@@ -196,23 +205,48 @@ handle_double(uint16_t instr)
 				    g_hash_table_lookup(memory_taint,
 					GINT_TO_POINTER(srcval)));
 
-				registers[dstval] |= memword(srcval);
+				res = (registers[dstval] | memword(srcval));
 			} else
 				unhandled(instr);
 		} else
 			unhandled(instr);
 		break;
 	case 0xf000:
-		// TODO affects flags
 		// AND
 		if (dstkind == OP_REG) {
 			if (srckind == OP_CONST) {
 				printf("DDD AND #%#04x, r%d\n", (uns)srcval,
 				    (uns)dstval);
 
-				registers[dstval] = registers[dstval] & srcval;
-			} else
+				res = registers[dstval] & srcval;
+			} else if (srckind == OP_MEM) {
+				printf("DDD AND @#%#04x (%#04x), r%d\n",
+				    (uns)srcval, (uns)memword(srcval),
+				    (uns)dstval);
+
+				addtaint(&register_taint[dstval],
+				    g_hash_table_lookup(memory_taint,
+					GINT_TO_POINTER(srcval)));
+				res = registers[dstval] & memword(srcval);
+			} else {
+				ASSERT(srckind == OP_REG, "enum invalid");
 				unhandled(instr);
+			}
+
+			if (bw)
+				res &= 0x00ff;
+
+			if (res & 0x8000)
+				setflags |= SR_N;
+			else
+				clrflags |= SR_N;
+			if (res == 0) {
+				setflags |= SR_Z;
+				clrflags |= SR_C;
+			} else {
+				clrflags |= SR_Z;
+				setflags |= SR_C;
+			}
 		} else
 			unhandled(instr);
 		break;
@@ -221,8 +255,18 @@ handle_double(uint16_t instr)
 		break;
 	}
 
-	if (dstkind == OP_REG && bw)
-		registers[dstval] &= 0x00ff;
+	ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+	registers[SR] |= setflags;
+	registers[SR] &= ~clrflags;
+
+	if (dstkind == OP_REG) {
+		ASSERT(res != 0x10000, "res never set");
+
+		if (bw)
+			res &= 0x00ff;
+
+		registers[dstval] = res & 0xffff;
+	}
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
@@ -257,6 +301,10 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 		break;
 	case CG:
 		switch (As) {
+		case AS_R3_0:
+			*srckind = OP_CONST;
+			*srcval = 0;
+			break;
 		case AS_R3_NEG:
 			*srckind = OP_CONST;
 			*srcval = 0xffff;
@@ -364,12 +412,7 @@ mem2reg(uint16_t addr, unsigned reg)
 	val = memword(addr);
 
 	memtaint = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(addr));
-	if (memtaint)
-		copytaint(&register_taint[reg], memtaint);
-	else {
-		free(register_taint[reg]);
-		register_taint[reg] = newtaint();
-	}
+	copytaint(&register_taint[reg], memtaint);
 
 	registers[reg] = val;
 }
@@ -423,9 +466,12 @@ copytaint(struct taint **dest, const struct taint *src)
 {
 	size_t tsize;
 
-	ASSERT(src->ntaints > 0, "copytaint");
+	if (src == NULL || src->ntaints == 0) {
+		(*dest)->ntaints = 0;
+		return;
+	}
 
-	tsize = sizeof(struct taint) + (src->ntaints * sizeof(src->addrs[0]));
+	tsize = sizeof(struct taint) + (src->ntaints * sizeof(uint16_t));
 	*dest = realloc(*dest, tsize);
 	ASSERT(*dest, "realloc");
 	memcpy(*dest, src, tsize);
@@ -512,4 +558,11 @@ addtaint(struct taint **dst, struct taint *src)
 			(*dst)->ntaints += 1;
 		}
 	}
+}
+
+uint16_t
+sr_flags(void)
+{
+
+	return registers[SR] & (SR_V | SR_CPUOFF | SR_N | SR_Z | SR_C);
 }

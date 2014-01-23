@@ -49,7 +49,11 @@ extern GHashTable	*memory_taint;		// addr -> struct taint
 
 #define AD_R2_ABS 0x80
 
+#define SR_V      0x0100
 #define SR_CPUOFF 0x0010
+#define SR_N      0x0004
+#define SR_Z      0x0002
+#define SR_C      0x0001
 
 enum operand_kind {
 	OP_REG,
@@ -87,6 +91,7 @@ void		 taint_mem(uint16_t addr);
 void		 addtaint(struct taint **dst, struct taint *src);
 bool		 regtainted(uint16_t reg, uint16_t addr);
 bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
+uint16_t	 sr_flags(void);
 
 void	handle_jump(uint16_t instr);
 void	handle_single(uint16_t instr);
