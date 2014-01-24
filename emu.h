@@ -66,6 +66,7 @@ enum operand_kind {
 	OP_MEM,		// immediate (inline), other mem indirects
 	OP_CONST,	// cg-/sr-based specials
 	OP_FLAGSONLY,	// cmp
+	OP_SYMBOLIC,
 };
 
 typedef unsigned int uns;
@@ -78,6 +79,16 @@ typedef unsigned int uns;
 	printf("\n"); \
 	abort_nodump(); \
 } while (false)
+
+static inline char *
+Xstrdup(const char *s)
+{
+	char *r;
+
+	r = strdup(s);
+	ASSERT(r, "oom");
+	return r;
+}
 
 void		 abort_nodump(void);
 void		 init(void);

@@ -10,6 +10,9 @@ uint64_t	 insns;
 bool		 off;
 bool		 unlocked;
 
+FILE		*trace;
+static bool	 diverged;
+
 static void
 print_ips(void)
 {
@@ -26,6 +29,8 @@ void
 init(void)
 {
 
+	trace = fopen("msp430_trace.txt", "wb");
+	ASSERT(trace, "fopen");
 	insns = 0;
 	off = unlocked = false;
 	start = now();
@@ -42,6 +47,9 @@ void
 destroy(void)
 {
 
+	fflush(trace);
+	fclose(trace);
+	trace = NULL;
 	ASSERT(memory_symbols, "mem_symbol_hash");
 	g_hash_table_destroy(memory_symbols);
 	memory_symbols = NULL;
@@ -100,6 +108,18 @@ emulate1(void)
 	ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
 
 	instr = memword(registers[PC]);
+	if (insns < 859984 && !diverged)
+		fprintf(trace, "pc:%04x insn:%04x sr:%04x\n", registers[PC],
+		    instr, registers[SR]);
+
+	if (registers[PC] == 0x44c8) {
+#if 0
+		fprintf(trace, "pc:44c8 insn:%04x %04x sr:%04x r12:%04x\n",
+		    instr, memword(registers[PC]+2), registers[SR],
+		    registers[12]);
+#endif
+		diverged = true;
+	}
 
 	// dec r15; jnz -2 busy loop
 	if ((instr == 0x831f || instr == 0x533f) &&
@@ -140,6 +160,11 @@ emulate(void)
 #endif
 
 	while (true) {
+		if (isregsym(PC)) {
+			printf("symbolic PC\n");
+			abort_nodump();
+		}
+
 		if (registers[PC] == 0x0010) {
 			// Callgate
 			if (registers[SR] & 0x8000) {
@@ -169,6 +194,7 @@ inc_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
+	ASSERT(!isregsym(reg), "symbolic reg: can't inc");
 	registers[reg] = (registers[reg] + inc) & 0xffff;
 }
 
@@ -180,6 +206,7 @@ dec_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
+	ASSERT(!isregsym(reg), "symbolic reg: can't dec");
 	registers[reg] = (registers[reg] - inc) & 0xffff;
 }
 
@@ -198,6 +225,11 @@ handle_jump(uint16_t instr)
 	offset = (offset << 1) & 0xffff;
 
 	inc_reg(PC, 0);
+
+	if (cnd != 0x7 && isregsym(SR)) {
+		printf("XXX symbolic branch\n");
+		abort_nodump();
+	}
 
 	switch (cnd) {
 	case 0x0:
@@ -253,20 +285,31 @@ handle_single(uint16_t instr)
 	unsigned res = 0x10000;
 	uint16_t setflags = 0,
 		 clrflags = 0;
+	char *srcsym = NULL, *ressym = NULL;
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 
+	dstkind = srckind;
+	dstval = srcval;
+
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
-		srcnum = registers[srcval];
+		if (isregsym(srcval))
+			srcsym = regsym(srcval);
+		else
+			srcnum = registers[srcval];
 		break;
 	case OP_MEM:
-		if (bw)
-			srcnum = memory[srcval];
-		else
-			srcnum = memword(srcval);
+		if (ismemsym(srcval, bw))
+			srcsym = memsym(srcval, bw);
+		else {
+			if (bw)
+				srcnum = memory[srcval];
+			else
+				srcnum = memword(srcval);
+		}
 		break;
 	case OP_CONST:
 		srcnum = srcval;
@@ -285,106 +328,129 @@ handle_single(uint16_t instr)
 	switch (bits(instr, 9, 7)) {
 	case 0x000:
 		// RRC
-		if (bw)
-			srcnum &= 0xff;
-		res = srcnum >> 1;
-		if (registers[SR] & SR_C) {
+		if (srcsym) {
+			printf("XXX symbolic RRC\n");
+			abort_nodump();
+		} else {
 			if (bw)
-				res |= 0x80;
-			else
-				res |= 0x8000;
-		}
+				srcnum &= 0xff;
+			res = srcnum >> 1;
+			if (registers[SR] & SR_C) {
+				if (bw)
+					res |= 0x80;
+				else
+					res |= 0x8000;
+			}
 
-		if (srcnum & 0x1)
-			setflags |= SR_C;
-		else
-			clrflags |= SR_C;
-		if (res & 0x8000)
-			setflags |= SR_N;
-		// doesn't clear N
-		if (res)
-			clrflags |= SR_Z;
-		// doesn't set Z
-		dstval = srcval;
-		dstkind = srckind;
+			if (srcnum & 0x1)
+				setflags |= SR_C;
+			else
+				clrflags |= SR_C;
+			if (res & 0x8000)
+				setflags |= SR_N;
+			// doesn't clear N
+			if (res)
+				clrflags |= SR_Z;
+			// doesn't set Z
+		}
 		break;
 	case 0x080:
 		// SWPB (no flags)
-		res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
-		dstval = srcval;
-		dstkind = srckind;
+		if (srcsym) {
+			printf("XXX symbolic SWPB\n");
+			abort_nodump();
+		} else
+			res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
 		break;
 	case 0x100:
 		// RRA (flags)
-		if (bw)
-			srcnum &= 0xff;
-		res = srcnum >> 1;
-		if (bw && (0x80 & srcnum))
-			res |= 0x80;
-		else if (bw == 0 && (0x8000 & srcnum))
-			res |= 0x8000;
+		if (srcsym) {
+			printf("XXX symbolic RRA\n");
+			abort_nodump();
+		} else {
+			if (bw)
+				srcnum &= 0xff;
+			res = srcnum >> 1;
+			if (bw && (0x80 & srcnum))
+				res |= 0x80;
+			else if (bw == 0 && (0x8000 & srcnum))
+				res |= 0x8000;
 
-		clrflags |= SR_Z;
-		if (0x8000 & res)
-			setflags |= SR_N;
-
-		dstval = srcval;
-		dstkind = srckind;
-
+			clrflags |= SR_Z;
+			if (0x8000 & res)
+				setflags |= SR_N;
+		}
 		break;
 	case 0x180:
 		// SXT (sets flags)
-		if (srcnum & 0x80)
-			res = srcnum | 0xff00;
-		else
-			res = srcnum & 0x00ff;
+		if (srcsym) {
+			printf("XXX symbolic SXT\n");
+			abort_nodump();
+		} else {
+			if (srcnum & 0x80)
+				res = srcnum | 0xff00;
+			else
+				res = srcnum & 0x00ff;
 
-		dstval = srcval;
-		dstkind = srckind;
-		andflags(res, &setflags, &clrflags);
+			andflags(res, &setflags, &clrflags);
+		}
 		break;
 	case 0x200:
 		// PUSH (no flags)
-		res = srcnum;
-		dec_reg(SP, 0);
-		dstval = registers[SP];
-		dstkind = OP_MEM;
+		if (srcsym) {
+			printf("XXX symbolic PUSH\n");
+			abort_nodump();
+		} else {
+			res = srcnum;
+			dec_reg(SP, 0);
+			dstval = registers[SP];
+			dstkind = OP_MEM;
+		}
 		break;
 	case 0x280:
 		// CALL (no flags)
+		if (srcsym) {
+			printf("XXX symbolic PUSH\n");
+			abort_nodump();
+		} else {
+			// Call [src]
+			res = srcnum;
+			dstval = PC;
+			dstkind = OP_REG;
 
-		// Call [src]
-		res = srcnum;
-		dstval = PC;
-		dstkind = OP_REG;
-
-		// Push PC+1
-		dec_reg(SP, 0);
-		memwriteword(registers[SP], registers[PC]);
+			// Push PC+1
+			dec_reg(SP, 0);
+			memwriteword(registers[SP], registers[PC]);
+		}
 		break;
 	default:
 		unhandled(instr);
 		break;
 	}
 
-	ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-	registers[SR] |= setflags;
-	registers[SR] &= ~clrflags;
+	if (ressym) {
+		// TODO XXX
+		abort_nodump();
+	} else {
+		ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+		registers[SR] |= setflags;
+		registers[SR] &= ~clrflags;
 
-	if (dstkind == OP_REG) {
-		ASSERT(res != 0x10000, "res never set");
+		if (dstkind == OP_REG) {
+			ASSERT(res != 0x10000, "res never set");
 
-		if (bw)
-			res &= 0x00ff;
+			if (bw)
+				res &= 0x00ff;
 
-		registers[dstval] = res & 0xffff;
-	} else if (dstkind == OP_MEM) {
-		if (bw)
-			memory[dstval] = res & 0xff;
-		else
-			memwriteword(dstval, res);
-	} else
-		ASSERT(dstkind == OP_FLAGSONLY, "x");
+			registers[dstval] = res & 0xffff;
+		} else if (dstkind == OP_MEM) {
+			if (bw)
+				memory[dstval] = res & 0xff;
+			else
+				memwriteword(dstval, res);
+		} else
+			ASSERT(dstkind == OP_FLAGSONLY, "x");
+	}
 }
 
 void
@@ -402,6 +468,7 @@ handle_double(uint16_t instr)
 		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
+	char *srcsym = NULL, *ressym = NULL, *dstsym = NULL;
 
 	inc_reg(PC, 0);
 
@@ -413,13 +480,20 @@ handle_double(uint16_t instr)
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
-		srcnum = registers[srcval];
+		if (isregsym(srcval))
+			srcsym = regsym(srcval);
+		else
+			srcnum = registers[srcval];
 		break;
 	case OP_MEM:
-		if (bw)
-			srcnum = memory[srcval];
-		else
-			srcnum = memword(srcval);
+		if (ismemsym(srcval, bw))
+			srcsym = memsym(srcval, bw);
+		else {
+			if (bw)
+				srcnum = memory[srcval];
+			else
+				srcnum = memword(srcval);
+		}
 		break;
 	case OP_CONST:
 		srcnum = srcval;
@@ -432,13 +506,20 @@ handle_double(uint16_t instr)
 	// Load addressed dst values
 	switch (dstkind) {
 	case OP_REG:
-		dstnum = registers[dstval];
+		if (isregsym(dstval))
+			dstsym = regsym(dstval);
+		else
+			dstnum = registers[dstval];
 		break;
 	case OP_MEM:
-		if (bw)
-			dstnum = memory[dstval];
-		else
-			dstnum = memword(dstval);
+		if (ismemsym(dstval, bw))
+			dstsym = memsym(dstval, bw);
+		else {
+			if (bw)
+				dstnum = memory[dstval];
+			else
+				dstnum = memword(dstval);
+		}
 		break;
 	case OP_CONST:
 		ASSERT(instr == 0x4303, "nop");
@@ -451,134 +532,179 @@ handle_double(uint16_t instr)
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
-		res = srcnum;
+		if (srcsym)
+			ressym = Xstrdup(srcsym);
+		else
+			res = srcnum;
 		break;
 	case 0x5000:
 		// ADD (flags)
-		if (bw) {
-			dstnum &= 0xff;
-			srcnum &= 0xff;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic ADD ->SR\n");
+			abort_nodump();
+		} else {
+			if (bw) {
+				dstnum &= 0xff;
+				srcnum &= 0xff;
+			}
+			res = dstnum + srcnum;
+			addflags(res, bw, &setflags, &clrflags);
+			if (bw)
+				res &= 0x00ff;
+			else
+				res &= 0xffff;
 		}
-		res = dstnum + srcnum;
-		addflags(res, bw, &setflags, &clrflags);
-		if (bw)
-			res &= 0x00ff;
-		else
-			res &= 0xffff;
 		break;
 	case 0x6000:
 		// ADDC (flags)
-		if (bw) {
-			dstnum &= 0xff;
-			srcnum &= 0xff;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic ADDC ->SR\n");
+			abort_nodump();
+		} else {
+			if (bw) {
+				dstnum &= 0xff;
+				srcnum &= 0xff;
+			}
+			res = dstnum + srcnum + ((registers[SR] & SR_C) ? 1 : 0);
+			addflags(res, bw, &setflags, &clrflags);
+			if (bw)
+				res &= 0x00ff;
+			else
+				res &= 0xffff;
 		}
-		res = dstnum + srcnum + ((registers[SR] & SR_C) ? 1 : 0);
-		addflags(res, bw, &setflags, &clrflags);
-		if (bw)
-			res &= 0x00ff;
-		else
-			res &= 0xffff;
 		break;
 	case 0x8000:
 		// SUB (flags)
-		srcnum = ~srcnum & 0xffff;
-		if (bw) {
-			dstnum &= 0xff;
-			srcnum &= 0xff;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic SUB ->SR\n");
+			abort_nodump();
+		} else {
+			srcnum = ~srcnum & 0xffff;
+			if (bw) {
+				dstnum &= 0xff;
+				srcnum &= 0xff;
+			}
+			res = dstnum + srcnum + 1;
+			addflags(res, bw, &setflags, &clrflags);
+			if (bw)
+				res &= 0x00ff;
+			else
+				res &= 0xffff;
 		}
-		res = dstnum + srcnum + 1;
-		addflags(res, bw, &setflags, &clrflags);
-		if (bw)
-			res &= 0x00ff;
-		else
-			res &= 0xffff;
 		break;
 	case 0x9000:
 		// CMP (flags)
-		dstkind = OP_FLAGSONLY;
-		srcnum = ~srcnum & 0xffff;
-		if (bw) {
-			dstnum &= 0xff;
-			srcnum &= 0xff;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic CMP ->SR\n");
+			abort_nodump();
+		} else {
+			dstkind = OP_FLAGSONLY;
+			srcnum = ~srcnum & 0xffff;
+			if (bw) {
+				dstnum &= 0xff;
+				srcnum &= 0xff;
+			}
+			res = dstnum + srcnum + 1;
+			addflags(res, bw, &setflags, &clrflags);
+			if (bw)
+				res &= 0x00ff;
+			else
+				res &= 0xffff;
 		}
-		res = dstnum + srcnum + 1;
-		addflags(res, bw, &setflags, &clrflags);
-		if (bw)
-			res &= 0x00ff;
-		else
-			res &= 0xffff;
 		break;
 	case 0xa000:
 		// DADD (flags)
-		{
-		unsigned carry = 0;
-		bool setn = false;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic DADD ->SR\n");
+			abort_nodump();
+		} else {
+			unsigned carry = 0;
+			bool setn = false;
 
-		res = 0;
-		for (unsigned i = 0; i < ((bw)? 8 : 16); i += 4) {
-			unsigned a = bits(srcnum, i+3, i) >> i,
-				 b = bits(dstnum, i+3, i) >> i,
-				 partial;
-			partial = a + b + carry;
-			setn = !!(partial & 0x8);
-			if (partial >= 10) {
-				partial -= 10;
-				carry = 1;
-			} else
-				carry = 0;
+			res = 0;
+			for (unsigned i = 0; i < ((bw)? 8 : 16); i += 4) {
+				unsigned a = bits(srcnum, i+3, i) >> i,
+					 b = bits(dstnum, i+3, i) >> i,
+					 partial;
+				partial = a + b + carry;
+				setn = !!(partial & 0x8);
+				if (partial >= 10) {
+					partial -= 10;
+					carry = 1;
+				} else
+					carry = 0;
 
-			res |= ((partial & 0xf) << i);
-		}
+				res |= ((partial & 0xf) << i);
+			}
 
-		if (setn)
-			setflags |= SR_N;
-		if (carry)
-			setflags |= SR_C;
-		else
-			clrflags |= SR_C;
+			if (setn)
+				setflags |= SR_N;
+			if (carry)
+				setflags |= SR_C;
+			else
+				clrflags |= SR_C;
 		}
 		break;
 	case 0xd000:
 		// BIS (no flags)
-		res = dstnum | srcnum;
+		if (srcsym || dstsym) {
+			printf("XXX symbolic BIS\n");
+			abort_nodump();
+		} else
+			res = dstnum | srcnum;
 		break;
 	case 0xe000:
 		// XOR (flags)
-		res = dstnum ^ srcnum;
-		if (bw)
-			res &= 0x00ff;
-		andflags(res, &setflags, &clrflags);
+		if (srcsym || dstsym) {
+			printf("XXX symbolic XOR -> SR\n");
+			abort_nodump();
+		} else {
+			res = dstnum ^ srcnum;
+			if (bw)
+				res &= 0x00ff;
+			andflags(res, &setflags, &clrflags);
+		}
 		break;
 	case 0xf000:
 		// AND (flags)
-		res = dstnum & srcnum;
-		if (bw)
-			res &= 0x00ff;
-		andflags(res, &setflags, &clrflags);
+		if (srcsym || dstsym) {
+			printf("XXX symbolic AND -> SR\n");
+			abort_nodump();
+		} else {
+			res = dstnum & srcnum;
+			if (bw)
+				res &= 0x00ff;
+			andflags(res, &setflags, &clrflags);
+		}
 		break;
 	default:
 		unhandled(instr);
 		break;
 	}
 
-	ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-	registers[SR] |= setflags;
-	registers[SR] &= ~clrflags;
+	if (ressym) {
+		// TODO XXX
+		abort_nodump();
+	} else {
+		ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+		registers[SR] |= setflags;
+		registers[SR] &= ~clrflags;
 
-	if (dstkind == OP_REG) {
-		ASSERT(res != (unsigned)-1, "res never set");
+		if (dstkind == OP_REG) {
+			ASSERT(res != (unsigned)-1, "res never set");
 
-		if (bw)
-			res &= 0x00ff;
+			if (bw)
+				res &= 0x00ff;
 
-		registers[dstval] = res & 0xffff;
-	} else if (dstkind == OP_MEM) {
-		if (bw)
-			memory[dstval] = res & 0xff;
-		else
-			memwriteword(dstval, res);
-	} else
-		ASSERT(dstkind == OP_FLAGSONLY, "x");
+			registers[dstval] = res & 0xffff;
+		} else if (dstkind == OP_MEM) {
+			if (bw)
+				memory[dstval] = res & 0xff;
+			else
+				memwriteword(dstval, res);
+		} else
+			ASSERT(dstkind == OP_FLAGSONLY, "x");
+	}
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
