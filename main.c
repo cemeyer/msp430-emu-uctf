@@ -607,7 +607,6 @@ handle_double(uint16_t instr)
 	case 0x5000:
 		// ADD (flags)
 		if (srcsym) {
-			// TODO could be less symbolic
 			if (bw)
 				ressym = symsprintf(0, 0x00ff,
 				    "(((%s) & 0xff) + ((%s) & 0xff)) & 0xff",
@@ -731,8 +730,16 @@ handle_double(uint16_t instr)
 	case 0xe000:
 		// XOR (flags)
 		if (srcsym) {
-			printf("XXX symbolic XOR -> SR\n");
-			abort_nodump();
+			if (bw)
+				ressym = symsprintf(0, 0xff,
+				    "((%s) & 0xff) ^ ((%s) & 0xff)",
+				    srcsym->symbolic, dstsym->symbolic);
+			else
+				ressym = symsprintf(0, 0xffff,
+				    "(%s) ^ (%s)",
+				    srcsym->symbolic, dstsym->symbolic);
+			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			    ressym->symbolic);
 		} else {
 			res = dstnum ^ srcnum;
 			if (bw)
