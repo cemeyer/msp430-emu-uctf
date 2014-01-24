@@ -35,8 +35,11 @@ mksexp(enum sexp_kind sk, unsigned nargs, ...)
 	t->s_nargs = nargs;
 
 	va_start(ap, nargs);
-	for (unsigned i = 0; i < nargs; i++)
+	for (unsigned i = 0; i < nargs; i++) {
 		t->s_arg[i] = va_arg(ap, struct sexp *);
+		ASSERT(t->s_arg[i] || sk == S_INP || sk == S_IMMEDIATE,
+		    "non-null");
+	}
 	va_end(ap);
 
 	return t;
@@ -1637,12 +1640,13 @@ peep_expfirst(struct sexp *s, bool *changed)
 	case S_OR:
 	case S_AND:
 	case S_XOR:
-		if (s->s_arg[1]->s_kind == S_IMMEDIATE) {
+		if (s->s_arg[0]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_kind != S_IMMEDIATE) {
 			struct sexp *t;
 
-			t = s->s_arg[2];
-			s->s_arg[2] = s->s_arg[1];
-			s->s_arg[1] = t;
+			t = s->s_arg[1];
+			s->s_arg[1] = s->s_arg[0];
+			s->s_arg[0] = t;
 			*changed = true;
 		}
 		break;
@@ -1660,15 +1664,21 @@ sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
     bool *changed)
 {
 
+	ASSERT(s, "non-null");
 	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
 		return s;
 
-	for (unsigned i = 0; i < s->s_nargs; i++)
+	for (unsigned i = 0; i < s->s_nargs; i++) {
+		ASSERT(s->s_arg[i], "non-null");
 		s->s_arg[i] = sexpvisit(sk, nargs, s->s_arg[i], cb, changed);
+		ASSERT(s->s_arg[i], "non-null");
+	}
 
 	if ((sk == s->s_kind || sk == S_MATCH_ANY) &&
-	    ((uns)nargs == s->s_nargs || nargs == -1))
+	    ((uns)nargs == s->s_nargs || nargs == -1)) {
 		s = cb(s, changed);
+		ASSERT(s, "non-null");
+	}
 
 	return s;
 }
@@ -1676,15 +1686,14 @@ sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
 struct sexp *
 peephole(struct sexp *s)
 {
-#if 0
 	bool changed;
 
+	ASSERT(s, "non-null");
 	do {
 		changed = false;
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_expfirst, &changed);
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_constreduce, &changed);
 	} while (changed);
-#endif
 
 	return s;
 }

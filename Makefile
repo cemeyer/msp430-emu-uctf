@@ -6,7 +6,7 @@ msp430-emu: main.c emu.h
 	gcc $(FLAGS) $(OPTFLAGS) $(GLIB_FLAGS) $< -o $@
 
 check: check_instr.c main.c emu.h
-	gcc $(FLAGS) $(OPTFLAGS) $(GLIB_FLAGS) $< -lcheck -DEMU_CHECK main.c -o check_instr
+	gcc $(FLAGS) $(OPTFLAGS) -O0 $(GLIB_FLAGS) $< -lcheck -DEMU_CHECK main.c -o check_instr
 	./check_instr
 
 bfhw: bfhw.c main.c emu.h
