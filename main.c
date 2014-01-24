@@ -339,10 +339,10 @@ handle_single(uint16_t instr)
 			// Could be less symbolic
 			if (bw)
 				ressym = symsprintf(0, 0x007f,
-				    "((%s) & 0xff) >> 1", srcsym);
+				    "((%s) & 0xff) >> 1", srcsym->symbolic);
 			else
 				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
-				    srcsym);
+				    srcsym->symbolic);
 			flagsym = symsprintf(0, 0xffff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
@@ -443,8 +443,9 @@ handle_single(uint16_t instr)
 	}
 
 	if (ressym) {
-		if (flagsym && isregsym(SR)) {
-			free(regsym(SR));
+		if (flagsym) {
+			if (isregsym(SR))
+				free(regsym(SR));
 			register_symbols[SR] = flagsym;
 		}
 
@@ -592,10 +593,10 @@ handle_double(uint16_t instr)
 			if (bw)
 				ressym = symsprintf(0, 0x00ff,
 				    "(((%s) & 0xff) + ((%s) & 0xff)) & 0xff",
-				    srcsym, dstsym);
+				    srcsym->symbolic, dstsym->symbolic);
 			else
 				ressym = symsprintf(0, 0xffff, "(%s) + (%s)",
-				    srcsym, dstsym);
+				    srcsym->symbolic, dstsym->symbolic);
 			flagsym = symsprintf(0, 0xffff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
@@ -739,8 +740,9 @@ handle_double(uint16_t instr)
 	}
 
 	if (ressym) {
-		if (flagsym && isregsym(SR)) {
-			free(regsym(SR));
+		if (flagsym) {
+			if (isregsym(SR))
+				free(regsym(SR));
 			register_symbols[SR] = flagsym;
 		}
 

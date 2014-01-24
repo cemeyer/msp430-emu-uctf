@@ -1314,6 +1314,29 @@ START_TEST(test_adc_indpc)
 }
 END_TEST
 
+START_TEST(test_symbolic)
+{
+	uint16_t code[] = {
+		0x5035,		// add imm, r5
+		0x1337,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	register_symbols[5] = symsprintf(0, 0xffff, "X");
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(isregsym(SR));
+	ck_assert(isregsym(5));
+	ck_assert(regsym(5)->symbol_mask == 0xffff);
+	ck_assert_str_eq("(0x1337) + (X)", regsym(5)->symbolic);
+	ck_assert_str_eq("sr((0x1337) + (X))", regsym(SR)->symbolic);
+}
+END_TEST
+
+// ^^^ TODO: .B clears upper concrete, mask bits.
+
 Suite *
 suite_instr(void)
 {
@@ -1436,6 +1459,11 @@ suite_instr(void)
 	tcase_add_test(trra, test_rra);
 	tcase_add_test(trra, test_rrab);
 	suite_add_tcase(s, trra);
+
+	TCase *tsymbolic = tcase_create("symbolic");
+	tcase_add_checked_fixture(tsymbolic, setup_machine, teardown_machine);
+	tcase_add_test(tsymbolic, test_symbolic);
+	suite_add_tcase(s, tsymbolic);
 
 	return s;
 }
