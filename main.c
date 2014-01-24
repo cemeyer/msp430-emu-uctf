@@ -343,7 +343,7 @@ handle_single(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
 				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			flagsym = symsprintf(0, 0xffff, "sr_rrc(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw)
@@ -382,8 +382,15 @@ handle_single(uint16_t instr)
 	case 0x100:
 		// RRA (flags)
 		if (srcsym) {
-			printf("XXX symbolic RRA\n");
-			abort_nodump();
+			// Could be less symbolic
+			if (bw)
+				ressym = symsprintf(0, 0x00ff,
+				    "((%s) & 0xff) / 2", srcsym->symbolic);
+			else
+				ressym = symsprintf(0, 0xffff, "(%s) / 2",
+				    srcsym->symbolic);
+			flagsym = symsprintf(0, 0xffff, "sr_rra(%s)",
+			    ressym->symbolic);
 		} else {
 			if (bw)
 				srcnum &= 0xff;
