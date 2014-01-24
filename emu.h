@@ -1,6 +1,8 @@
 #ifndef EMU_H
 #define EMU_H
 
+#define _GNU_SOURCE
+
 #include <sys/cdefs.h>
 
 #include <errno.h>
@@ -18,22 +20,11 @@
 
 #define ARRAYLEN(arr) ((sizeof(arr)) / sizeof((arr)[0]))
 
-struct taint {
-	unsigned	ntaints;
-	uint16_t	addrs[0];
-};
-
-enum taint_apply {
-	t_copy,
-	t_ignore,
-	t_add,
-};
-
 extern uint16_t		 pc_start;
 extern uint16_t		 registers[16];
 extern uint8_t		 memory[0x10000];
-extern struct taint	*register_taint[16];
-extern GHashTable	*memory_taint;		// addr -> struct taint
+extern char		*register_symbols[16];
+extern GHashTable	*memory_symbols;		// addr -> char*
 extern bool		 off;
 extern bool		 unlocked;
 
@@ -68,6 +59,7 @@ extern bool		 unlocked;
 #define SR_C      0x0001
 
 #define sec       1000000ULL
+#define ptr(X)    ((void*)((uintptr_t)X))
 
 enum operand_kind {
 	OP_REG,		// reg direct
@@ -99,21 +91,13 @@ void		 memwriteword(uint16_t addr, uint16_t word);
 void		 mem2reg(uint16_t addr, unsigned reg);
 void		 reg2mem(unsigned reg, uint16_t addr);
 uint16_t	 bits(uint16_t v, unsigned max, unsigned min);
-void		 copytaint(struct taint **dest, const struct taint *src);
-void		 copytaintmem(uint16_t addr, const struct taint *src);
 #define unhandled(instr) _unhandled(__FILE__, __LINE__, instr)
 void		 _unhandled(const char *f, unsigned l, uint16_t instr);
 #define illins(instr) _illins(__FILE__, __LINE__, instr)
 void		 _illins(const char *f, unsigned l, uint16_t instr);
-struct taint	*newtaint(void);
 void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 dec_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
-void		 taint_mem(uint16_t addr);
-void		 addtaint(struct taint **dst, struct taint *src);
-void		 addtaintmem(uint16_t addr, struct taint *src);
-bool		 regtainted(uint16_t reg, uint16_t addr);
-bool		 regtaintedexcl(uint16_t reg, uint16_t addr);
 uint16_t	 sr_flags(void);
 void		 addflags(unsigned res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);

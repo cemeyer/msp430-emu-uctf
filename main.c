@@ -3,8 +3,8 @@
 uint16_t	 pc_start;
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
-struct taint	*register_taint[16];
-GHashTable	*memory_taint;		// addr -> struct taint
+char		*register_symbols[16];
+GHashTable	*memory_symbols;		// addr -> char*
 uint64_t	 start;
 uint64_t	 insns;
 bool		 off;
@@ -30,26 +30,26 @@ init(void)
 	off = unlocked = false;
 	start = now();
 	memset(memory, 0, sizeof(memory));
-	memory_taint = g_hash_table_new_full(NULL, NULL, NULL, free);
-	ASSERT(memory_taint, "g_hash");
+	memory_symbols = g_hash_table_new_full(NULL, NULL, NULL, free);
+	ASSERT(memory_symbols, "g_hash");
 
 	memset(registers, 0, sizeof registers);
 	for (unsigned reg = 0; reg < 16; reg++)
-		register_taint[reg] = newtaint();
+		register_symbols[reg] = NULL;
 }
 
 void
 destroy(void)
 {
 
-	ASSERT(memory_taint, "mem_taint_hash");
-	g_hash_table_destroy(memory_taint);
-	memory_taint = NULL;
+	ASSERT(memory_symbols, "mem_symbol_hash");
+	g_hash_table_destroy(memory_symbols);
+	memory_symbols = NULL;
 
 	for (unsigned reg = 0; reg < 16; reg++) {
-		ASSERT(register_taint[reg], "reg_taint");
-		free(register_taint[reg]);
-		register_taint[reg] = NULL;
+		if (register_symbols[reg])
+			free(register_symbols[reg]);
+		register_symbols[reg] = NULL;
 	}
 }
 
@@ -81,9 +81,6 @@ main(int argc, char **argv)
 	memwriteword(0x10, 0x4130); // callgate
 
 	fclose(romfile);
-
-	// XXX set memory taints
-	// XXX or just auto-set on getsn()
 
 	emulate();
 	printf("Got CPUOFF, stopped.\n");
@@ -135,7 +132,7 @@ void
 emulate(void)
 {
 
-	mem2reg(0xfffe, PC);
+	registers[PC] = memword(0xfffe);
 #ifndef QUIET
 	printf("Initial register state:\n");
 	print_regs();
@@ -253,11 +250,9 @@ handle_single(uint16_t instr)
 		 As = bits(instr, 5, 4),
 		 dsrc = bits(instr, 3, 0),
 		 srcval, srcnum, dstval;
-	struct taint *taintsrc = NULL;
 	unsigned res = 0x10000;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	enum taint_apply ta = t_ignore;
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
@@ -265,12 +260,9 @@ handle_single(uint16_t instr)
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
-		taintsrc = register_taint[srcval];
 		srcnum = registers[srcval];
 		break;
 	case OP_MEM:
-		taintsrc = g_hash_table_lookup(memory_taint,
-		    GINT_TO_POINTER(srcval & 0xfffe));
 		if (bw)
 			srcnum = memory[srcval];
 		else
@@ -353,7 +345,6 @@ handle_single(uint16_t instr)
 		break;
 	case 0x200:
 		// PUSH (no flags)
-		ta = t_copy;
 		res = srcnum;
 		dec_reg(SP, 0);
 		dstval = registers[SP];
@@ -361,7 +352,6 @@ handle_single(uint16_t instr)
 		break;
 	case 0x280:
 		// CALL (no flags)
-		ta = t_copy;
 
 		// Call [src]
 		res = srcnum;
@@ -371,7 +361,6 @@ handle_single(uint16_t instr)
 		// Push PC+1
 		dec_reg(SP, 0);
 		memwriteword(registers[SP], registers[PC]);
-		copytaintmem(registers[SP], register_taint[PC]);
 		break;
 	default:
 		unhandled(instr);
@@ -389,22 +378,11 @@ handle_single(uint16_t instr)
 			res &= 0x00ff;
 
 		registers[dstval] = res & 0xffff;
-		if (ta == t_add)
-			addtaint(&register_taint[dstval], taintsrc);
-		else if (ta == t_copy)
-			copytaint(&register_taint[dstval], taintsrc);
 	} else if (dstkind == OP_MEM) {
-		if (bw) {
-			if (ta == t_copy)
-				ta = t_add;
+		if (bw)
 			memory[dstval] = res & 0xff;
-		} else
+		else
 			memwriteword(dstval, res);
-
-		if (ta == t_add)
-			addtaintmem(dstval & 0xfffe, taintsrc);
-		else if (ta == t_copy)
-			copytaintmem(dstval, taintsrc);
 	} else
 		ASSERT(dstkind == OP_FLAGSONLY, "x");
 }
@@ -413,7 +391,6 @@ void
 handle_double(uint16_t instr)
 {
 	enum operand_kind srckind, dstkind;
-	struct taint *taintsrc = NULL;
 	uint16_t dsrc = bits(instr, 11, 8) >> 8,
 		 Ad = bits(instr, 7, 7),
 		 bw = bits(instr, 6, 6),
@@ -425,7 +402,6 @@ handle_double(uint16_t instr)
 		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	enum taint_apply ta = t_ignore;
 
 	inc_reg(PC, 0);
 
@@ -437,12 +413,9 @@ handle_double(uint16_t instr)
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
-		taintsrc = register_taint[srcval];
 		srcnum = registers[srcval];
 		break;
 	case OP_MEM:
-		taintsrc = g_hash_table_lookup(memory_taint,
-		    GINT_TO_POINTER(srcval & 0xfffe));
 		if (bw)
 			srcnum = memory[srcval];
 		else
@@ -478,12 +451,10 @@ handle_double(uint16_t instr)
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
-		ta = t_copy;
 		res = srcnum;
 		break;
 	case 0x5000:
 		// ADD (flags)
-		ta = t_add;
 		if (bw) {
 			dstnum &= 0xff;
 			srcnum &= 0xff;
@@ -497,7 +468,6 @@ handle_double(uint16_t instr)
 		break;
 	case 0x6000:
 		// ADDC (flags)
-		ta = t_add;
 		if (bw) {
 			dstnum &= 0xff;
 			srcnum &= 0xff;
@@ -511,7 +481,6 @@ handle_double(uint16_t instr)
 		break;
 	case 0x8000:
 		// SUB (flags)
-		ta = t_add;
 		srcnum = ~srcnum & 0xffff;
 		if (bw) {
 			dstnum &= 0xff;
@@ -571,12 +540,10 @@ handle_double(uint16_t instr)
 		break;
 	case 0xd000:
 		// BIS (no flags)
-		ta = t_add;
 		res = dstnum | srcnum;
 		break;
 	case 0xe000:
 		// XOR (flags)
-		ta = t_add;
 		res = dstnum ^ srcnum;
 		if (bw)
 			res &= 0x00ff;
@@ -584,7 +551,6 @@ handle_double(uint16_t instr)
 		break;
 	case 0xf000:
 		// AND (flags)
-		ta = t_add;
 		res = dstnum & srcnum;
 		if (bw)
 			res &= 0x00ff;
@@ -606,22 +572,11 @@ handle_double(uint16_t instr)
 			res &= 0x00ff;
 
 		registers[dstval] = res & 0xffff;
-		if (ta == t_add)
-			addtaint(&register_taint[dstval], taintsrc);
-		else if (ta == t_copy)
-			copytaint(&register_taint[dstval], taintsrc);
 	} else if (dstkind == OP_MEM) {
-		if (bw) {
-			if (ta == t_copy)
-				ta = t_add;
+		if (bw)
 			memory[dstval] = res & 0xff;
-		} else
+		else
 			memwriteword(dstval, res);
-
-		if (ta == t_add)
-			addtaintmem(dstval & 0xfffe, taintsrc);
-		else if (ta == t_copy)
-			copytaintmem(dstval, taintsrc);
 	} else
 		ASSERT(dstkind == OP_FLAGSONLY, "x");
 }
@@ -752,15 +707,6 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 	}
 }
 
-struct taint *
-newtaint(void)
-{
-	struct taint *res = malloc(sizeof(struct taint));
-	ASSERT(res, "malloc");
-	res->ntaints = 0;
-	return res;
-}
-
 void
 _unhandled(const char *f, unsigned l, uint16_t instr)
 {
@@ -793,52 +739,11 @@ memword(uint16_t addr)
 
 	ASSERT((addr & 0x1) == 0, "word load unaligned: %#04x",
 	    (unsigned)addr);
+	ASSERT(g_hash_table_lookup(memory_symbols, ptr(addr)) == NULL,
+	    "non-symbolic load");
+	ASSERT(g_hash_table_lookup(memory_symbols, ptr(addr + 1)) == NULL,
+	    "non-symbolic load");
 	return memory[addr] | ((uint16_t)memory[addr+1] << 8);
-}
-
-void
-mem2reg(uint16_t addr, unsigned reg)
-{
-	struct taint *memtaint;
-	uint16_t val;
-
-	ASSERT(reg < 16, "reg");
-
-	val = memword(addr);
-
-	memtaint = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(addr));
-	copytaint(&register_taint[reg], memtaint);
-
-	registers[reg] = val;
-}
-
-void
-reg2mem(unsigned reg, uint16_t addr)
-{
-
-	ASSERT(reg < 16, "reg");
-	ASSERT((addr & 0x1) == 0, "word store unaligned: %#04x",
-	    (unsigned)addr);
-
-	if (register_taint[reg]->ntaints > 0) {
-		struct taint *memtaint = g_hash_table_lookup(memory_taint,
-		    GINT_TO_POINTER(addr));
-
-		if (memtaint)
-			g_hash_table_remove(memory_taint,
-			    GINT_TO_POINTER(addr));
-		else
-			memtaint = newtaint();
-
-		copytaint(&memtaint, register_taint[reg]);
-		g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr),
-		    memtaint);
-	} else {
-		g_hash_table_remove(memory_taint, GINT_TO_POINTER(addr));
-	}
-
-	memory[addr] = registers[reg] & 0xff;
-	memory[addr+1] = (registers[reg] >> 8) & 0xff;
 }
 
 uint16_t
@@ -854,41 +759,6 @@ bits(uint16_t v, unsigned max, unsigned min)
 		mask &= ~( (1<<min) - 1 );
 
 	return v & mask;
-}
-
-void
-copytaint(struct taint **dest, const struct taint *src)
-{
-	size_t tsize;
-
-	if (src == NULL || src->ntaints == 0) {
-		(*dest)->ntaints = 0;
-		return;
-	}
-
-	tsize = sizeof(struct taint) + (src->ntaints * sizeof(uint16_t));
-	*dest = realloc(*dest, tsize);
-	ASSERT(*dest, "realloc");
-	memcpy(*dest, src, tsize);
-}
-
-void
-copytaintmem(uint16_t addr, const struct taint *src)
-{
-	struct taint *mt;
-	size_t tsize;
-
-	g_hash_table_remove(memory_taint, GINT_TO_POINTER(addr));
-
-	if (src == NULL || src->ntaints == 0)
-		return;
-
-	tsize = sizeof(struct taint) + (src->ntaints * sizeof(uint16_t));
-	mt = malloc(tsize);
-	ASSERT(mt, "oom");
-	memcpy(mt, src, tsize);
-
-	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
 }
 
 void
@@ -918,115 +788,6 @@ print_regs(void)
 		printf("  %04x", (uns)memword((registers[SP] & 0xfffe) + 2*i));
 	printf("\n");
 }
-
-void
-taint_mem(uint16_t addr)
-{
-	struct taint *mt;
-
-	mt = malloc(sizeof(struct taint) + sizeof(uint16_t));
-	ASSERT(mt, "oom");
-	mt->ntaints = 1;
-	mt->addrs[0] = addr;
-
-	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
-}
-
-bool
-regtainted(uint16_t reg, uint16_t addr)
-{
-
-	for (unsigned i = 0; i < register_taint[reg]->ntaints; i++)
-		if (register_taint[reg]->addrs[i] == addr)
-			return true;
-	return false;
-}
-
-bool
-regtaintedexcl(uint16_t reg, uint16_t addr)
-{
-
-	return regtainted(reg, addr) && (register_taint[reg]->ntaints == 1);
-}
-
-void
-addtaint(struct taint **dst, struct taint *src)
-{
-	unsigned total = (*dst)->ntaints;
-
-	if (src == NULL)
-		return;
-
-	if (src->ntaints == 0)
-		return;
-
-	total += src->ntaints;
-	*dst = realloc(*dst, sizeof(**dst) + total*sizeof(uint16_t));
-	ASSERT(*dst, "oom");
-
-	for (unsigned i = 0; i < src->ntaints; i++) {
-		uint16_t taddr = src->addrs[i];
-		bool dupe = false;
-
-		for (unsigned j = 0; j < (*dst)->ntaints; j++) {
-			if ((*dst)->addrs[j] == taddr) {
-				dupe = true;
-				break;
-			}
-		}
-
-		if (!dupe) {
-			(*dst)->addrs[(*dst)->ntaints] = taddr;
-			(*dst)->ntaints += 1;
-		}
-	}
-}
-
-void
-addtaintmem(uint16_t addr, struct taint *src)
-{
-	unsigned total = 0;
-	struct taint *mt;
-
-	ASSERT((addr & 1) == 0, "aligned");
-
-	if (src == NULL)
-		return;
-
-	if (src->ntaints == 0)
-		return;
-
-	mt = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(addr));
-	if (mt) {
-		g_hash_table_remove(memory_taint, GINT_TO_POINTER(addr));
-		total = mt->ntaints;
-	} else
-		mt = newtaint();
-
-	total += src->ntaints;
-	mt = realloc(mt, sizeof(*mt) + total*sizeof(uint16_t));
-	ASSERT(mt, "oom");
-
-	for (unsigned i = 0; i < src->ntaints; i++) {
-		uint16_t taddr = src->addrs[i];
-		bool dupe = false;
-
-		for (unsigned j = 0; j < mt->ntaints; j++) {
-			if (mt->addrs[j] == taddr) {
-				dupe = true;
-				break;
-			}
-		}
-
-		if (!dupe) {
-			mt->addrs[mt->ntaints] = taddr;
-			mt->ntaints += 1;
-		}
-	}
-
-	g_hash_table_insert(memory_taint, GINT_TO_POINTER(addr), mt);
-}
-
 
 uint16_t
 sr_flags(void)
@@ -1130,12 +891,21 @@ callgate(unsigned op)
 #endif
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
-		getsn(getsaddr, bufsz);
+		//getsn(getsaddr, bufsz);
+		for (unsigned i = 0; i < bufsz; i++) {
+			char *s = NULL;
+			int rc;
+
+			rc = asprintf(&s, "input[%d]", i);
+			ASSERT(rc != -1, "asprintf");
+			ASSERT(s, "oom");
+			g_hash_table_insert(memory_symbols,
+			    GINT_TO_POINTER(getsaddr), s);
+		}
 		break;
 	case 0x20:
 		// RNG
 		registers[15] = 0;
-		copytaint(&register_taint[15], NULL);
 		break;
 	case 0x7d:
 		// writes a non-zero byte to supplied pointer if password is

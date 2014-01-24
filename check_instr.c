@@ -7,12 +7,6 @@
 #define PC_LOAD     (0xfffe)
 #define CALL_GATE   (0x0010)
 
-#define ck_assert_taints(reg, args...) \
-    _ck_assert_taints(reg, args, 0x10000)
-
-#define ck_assert_taint_mem(addr, args...) \
-    _ck_assert_taint_mem(addr, args, 0x10000)
-
 #define ck_assert_flags(flags) _ck_assert_flags(__LINE__, flags)
 
 void
@@ -36,7 +30,7 @@ setup_machine(void)
 	uint16_t ret = 0x4130,
 		 run = CODE_REPEAT;
 
-	// zero regs/mem, clear taints
+	// zero regs/mem, clear symbols
 	init();
 
 	// Setup callgate (ret)
@@ -54,92 +48,6 @@ teardown_machine(void)
 {
 
 	destroy();
-}
-
-void
-_ck_assert_taints(uint16_t reg, ...)
-{
-	struct taint *rt = register_taint[reg];
-	char staints[600],
-	     rtaints[600];
-	unsigned n = 0, addr;
-	va_list ap;
-
-	strcpy(staints, "<");
-	strcpy(rtaints, "<");
-
-	for (unsigned i = 0; i < rt->ntaints; i++)
-		sprintf(&staints[strlen(staints)], "%#04x,", rt->addrs[i]);
-	strcat(staints, ">");
-
-	va_start(ap, reg);
-	while ((addr = va_arg(ap, unsigned)) != 0x10000) {
-		bool found = false;
-
-		sprintf(&rtaints[strlen(rtaints)], "%#04x,", addr);
-
-		for (unsigned i = 0; i < rt->ntaints; i++) {
-			if (rt->addrs[i] == addr) {
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-			ck_abort_msg("r%d: %#04x not found (taints: %s)\n",
-			    reg, addr, staints);
-		n++;
-	}
-	va_end(ap);
-
-	strcat(rtaints, ">");
-
-	if (n != rt->ntaints)
-		ck_abort_msg("r%d: More tainted than expected. Exp: %s, Act:"
-		    " %s.\n", reg, rtaints, staints);
-}
-
-void
-_ck_assert_taint_mem(uint16_t daddr, ...)
-{
-	struct taint *mt;
-	char staints[600],
-	     rtaints[600];
-	unsigned n = 0, addr;
-	va_list ap;
-
-	mt = g_hash_table_lookup(memory_taint, GINT_TO_POINTER(daddr));
-
-	strcpy(staints, "<");
-	strcpy(rtaints, "<");
-
-	for (unsigned i = 0; mt && i < mt->ntaints; i++)
-		sprintf(&staints[strlen(staints)], "%#04x,", mt->addrs[i]);
-	strcat(staints, ">");
-
-	va_start(ap, daddr);
-	while ((addr = va_arg(ap, unsigned)) != 0x10000) {
-		bool found = false;
-
-		sprintf(&rtaints[strlen(rtaints)], "%#04x,", addr);
-
-		for (unsigned i = 0; mt && i < mt->ntaints; i++) {
-			if (mt->addrs[i] == addr) {
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-			ck_abort_msg("%#04x: %#04x not found (taints: %s)\n",
-			    daddr, addr, staints);
-		n++;
-	}
-	va_end(ap);
-
-	strcat(rtaints, ">");
-
-	if (mt && n != mt->ntaints)
-		ck_abort_msg("%#04x: More tainted than expected. Exp: %s,"
-		    " Act: %s.\n", daddr, rtaints, staints);
 }
 
 static void
@@ -161,13 +69,11 @@ START_TEST(test_mov_const_reg)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	taint_mem(CODE_STEP + 2);
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[SP] == 0x4142);
-	ck_assert(regtaintedexcl(SP, CODE_STEP + 2));
 }
 END_TEST
 
@@ -182,13 +88,11 @@ START_TEST(test_mov_sr_abs_reg)
 
 	install_words_le(code, CODE_STEP, sizeof(code));
 	install_words_le(&word, 0x1000, sizeof(word));
-	taint_mem(0x1000);
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0x1234);
-	ck_assert(regtaintedexcl(5, 0x1000));
 }
 END_TEST
 
@@ -203,7 +107,6 @@ START_TEST(test_mov_pre_incr)
 
 	install_words_le(code, CODE_STEP, sizeof(code));
 	install_words_le(&word, 0x2400, sizeof(word));
-	taint_mem(0x2400);
 	registers[15] = 0x2400;
 
 	emulate1();
@@ -211,7 +114,6 @@ START_TEST(test_mov_pre_incr)
 	ck_assert(memword(0x1400) == word);
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert_msg(registers[15] == 0x2402);
-	ck_assert_taint_mem(0x1400, 0x2400);
 }
 END_TEST
 
@@ -278,7 +180,6 @@ START_TEST(test_and_flags2)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	taint_mem(CODE_STEP + 2);
 	registers[5] = 0xffff;
 	registers[SR] = 0xffef;
 
@@ -287,7 +188,6 @@ START_TEST(test_and_flags2)
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0x7fff);
 	ck_assert_msg(sr_flags() == SR_C, "sr_flags: %#04x", sr_flags());
-	ck_assert_taints(5, CODE_STEP + 2);
 }
 END_TEST
 
@@ -320,16 +220,12 @@ START_TEST(test_bis_imm_reg)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	taint_mem(CODE_STEP + 2);
-	taint_mem(CODE_STEP + 6);
 
 	emulate1();
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 8);
 	ck_assert(registers[5] == 0x5a8a);
-	ck_assert(regtainted(5, CODE_STEP + 2));
-	ck_assert(regtainted(5, CODE_STEP + 6));
 }
 END_TEST
 
@@ -342,14 +238,12 @@ START_TEST(test_bisb_imm_reg)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	taint_mem(CODE_STEP + 2);
 	registers[5] = 0x8182;
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(registers[5] == 0x008a);
-	ck_assert(regtaintedexcl(5, CODE_STEP + 2));
 }
 END_TEST
 
