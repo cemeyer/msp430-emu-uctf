@@ -201,7 +201,7 @@ inc_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
-	ASSERT(!isregsym(reg), "symbolic reg: can't inc");
+	ASSERT(!isregsym(reg), "symbolic reg(%u): can't inc", (uns)reg);
 	registers[reg] = (registers[reg] + inc) & 0xffff;
 }
 
@@ -213,7 +213,7 @@ dec_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
-	ASSERT(!isregsym(reg), "symbolic reg: can't dec");
+	ASSERT(!isregsym(reg), "symbolic reg(%u): can't dec", (uns)reg);
 	registers[reg] = (registers[reg] - inc) & 0xffff;
 }
 
@@ -234,7 +234,8 @@ handle_jump(uint16_t instr)
 	inc_reg(PC, 0);
 
 	if (cnd != 0x7 && isregsym(SR)) {
-		printf("XXX symbolic branch\n");
+		printf("XXX symbolic branch\nSR: ");
+		printsym(stdout, regsym(SR));
 		abort_nodump();
 	}
 
@@ -343,7 +344,7 @@ handle_single(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
 				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr_rrc(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr_rrc(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw)
@@ -389,7 +390,7 @@ handle_single(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0xffff, "(%s) / 2",
 				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr_rra(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr_rra(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw)
@@ -410,7 +411,7 @@ handle_single(uint16_t instr)
 		if (srcsym) {
 			ressym = symsprintf(0, 0xffff, "sxt(%s)",
 			    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			if (srcnum & 0x80)
@@ -623,7 +624,7 @@ handle_double(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0xffff, "(%s) + (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw) {
@@ -667,7 +668,7 @@ handle_double(uint16_t instr)
 				ressym = symsprintf(0, 0xffff,
 				    "(~(%s) & 0xffff) + (%s) + 1",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
@@ -685,11 +686,19 @@ handle_double(uint16_t instr)
 		break;
 	case 0x9000:
 		// CMP (flags)
+		dstkind = OP_FLAGSONLY;
 		if (srcsym) {
-			printf("XXX symbolic CMP ->SR\n");
-			abort_nodump();
+			if (bw)
+				ressym = symsprintf(0, 0x00ff,
+				    "((~(%s) & 0xff) + ((%s) & 0xff) + 1) & 0xff",
+				    srcsym->symbolic, dstsym->symbolic);
+			else
+				ressym = symsprintf(0, 0xffff,
+				    "(~(%s) & 0xffff) + (%s) + 1",
+				    srcsym->symbolic, dstsym->symbolic);
+			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
+			    ressym->symbolic);
 		} else {
-			dstkind = OP_FLAGSONLY;
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
 				dstnum &= 0xff;
@@ -755,7 +764,7 @@ handle_double(uint16_t instr)
 				ressym = symsprintf(0, 0xffff,
 				    "(%s) ^ (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum ^ srcnum;
@@ -781,7 +790,7 @@ handle_double(uint16_t instr)
 				    0xffff,
 				    "(%s) & (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum & srcnum;
@@ -812,8 +821,11 @@ handle_double(uint16_t instr)
 				freememsyms(dstval, bw);
 
 			memwritesym(dstval, bw, ressym);
-		} else
+		} else {
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
+			free(ressym);
+			ressym = NULL;
+		}
 	} else {
 		if (setflags || clrflags) {
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
@@ -852,6 +864,14 @@ handle_double(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
+	}
+
+	for (unsigned i = 0; i < 16; i++) {
+		if (isregsym(i) && regsym(i)->symbol_mask == 0) {
+			registers[i] = regsym(i)->concrete;
+			free(register_symbols[i]);
+			register_symbols[i] = NULL;
+		}
 	}
 }
 
