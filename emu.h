@@ -27,6 +27,7 @@ extern struct symbol	*register_symbols[16];
 extern GHashTable	*memory_symbols;		// addr -> struct symbol*
 extern bool		 off;
 extern bool		 unlocked;
+extern uint64_t		 insns;
 
 #define PC 0
 #define SP 1
@@ -83,6 +84,8 @@ typedef unsigned int uns;
 struct symbol {
 	uint16_t concrete;
 	uint16_t symbol_mask;
+	uint16_t inputoffhi,
+		 inputofflo;
 	char symbolic[0];
 };
 
@@ -135,6 +138,8 @@ void	load_src(uint16_t instr, uint16_t instr_decode_src,
 void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
 		 uint16_t Ad, uint16_t *dstval,
 		 enum operand_kind *dstkind);
+
+void	print_ips(void);
 
 static inline struct symbol *
 Xsymdup(const struct symbol *s)

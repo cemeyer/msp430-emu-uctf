@@ -10,4 +10,4 @@ check: check_instr.c main.c emu.h
 	./check_instr
 
 bfhw: bfhw.c main.c emu.h
-	gcc $(FLAGS) $(OPTFLAGS) $(GLIB_FLAGS) $< -lcheck -DEMU_CHECK -DAUTO_GETSN -DQUIET main.c -o $@
+	gcc $(FLAGS) $(OPTFLAGS) $(GLIB_FLAGS) $< -lcheck -DEMU_CHECK -DQUIET main.c -o $@

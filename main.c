@@ -14,7 +14,7 @@ bool		 ctrlc;
 FILE		*trace;
 static bool	 diverged;
 
-static void
+void
 print_ips(void)
 {
 	uint64_t end = now();
@@ -119,9 +119,12 @@ emulate1(void)
 	ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
 
 	instr = memword(registers[PC]);
-	if (insns < 859984 && !diverged)
-		fprintf(trace, "pc:%04x insn:%04x sr:%04x\n", registers[PC],
-		    instr, registers[SR]);
+#if 0
+	if (insns < 59984)
+		fprintf(trace, "pc:%04x insn:%04x %04x sr:%04x\n",
+		    registers[PC], instr, memword(registers[PC]+2),
+		    registers[SR]);
+#endif
 
 	if (registers[PC] == 0x44c8) {
 #if 0
@@ -143,6 +146,20 @@ emulate1(void)
 		goto out;
 	}
 
+#if 0
+	if (instr == 0x4ebd && (isregsym(13) || isregsym(14))) {
+		printf("mov @r14+, 0x0(r13)\n");
+		printf("r13 sym? %d\n", isregsym(13));
+		if (isregsym(13))
+			printsym(stdout, regsym(13));
+		printf("r14 sym? %d\n", isregsym(14));
+		if (isregsym(14))
+			printsym(stdout, regsym(14));
+		print_regs();
+		print_ips();
+	}
+#endif
+
 	switch (bits(instr, 15, 13)) {
 	case 0:
 		handle_single(instr);
@@ -154,6 +171,26 @@ emulate1(void)
 		handle_double(instr);
 		break;
 	}
+
+	for (unsigned i = 0; i < 16; i++) {
+		if (!isregsym(i))
+			continue;
+
+		if (strlen(regsym(i)->symbolic) > 48) {
+			printf("r%d is *too* symbolic:\n", i);
+			printsym(stdout, regsym(i));
+			off = true;
+		}
+	}
+
+#if 0
+	if (bits(instr, 15, 13) != 0x2000 && insns < 59984) {
+		for (unsigned i = 0; i < ((unsigned)registers[PC] - pc_start); i += 2)
+			fprintf(trace, "%02x%02x ", membyte(pc_start+i),
+			    membyte(pc_start+i+1));
+		fprintf(trace, "\n");
+	}
+#endif
 
 out:
 	insns++;
@@ -388,11 +425,39 @@ handle_single(uint16_t instr)
 	case 0x080:
 		// SWPB (no flags)
 		if (srcsym) {
-			ressym = symsprintf(
-			    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
-			    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
-			    "((%s) << 8) | ((%s) >> 8)", srcsym->symbolic,
-			    srcsym->symbolic);
+			if (srcsym->inputofflo != 0xffff &&
+			    srcsym->inputoffhi != 0xffff) {
+				if (srcsym->inputofflo == srcsym->inputoffhi - 1)
+					ressym = symsprintf(
+					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
+					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
+					    "(iword %d %d)",
+					    srcsym->inputoffhi,
+					    srcsym->inputofflo);
+				else if (srcsym->inputofflo == srcsym->inputoffhi + 1)
+					ressym = symsprintf(
+					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
+					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
+					    "(iword %d %d)",
+					    srcsym->inputofflo,
+					    srcsym->inputoffhi);
+				else {
+					ressym = symsprintf(
+					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
+					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
+					    "(swpb (| (<< (input %d) 8) (input %d)))",
+					    srcsym->inputoffhi, srcsym->inputofflo);
+					ASSERT(false, "weird");
+				}
+				ressym->inputoffhi = srcsym->inputofflo;
+				ressym->inputofflo = srcsym->inputoffhi;
+			} else
+				ressym = symsprintf(
+				    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
+				    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
+				    "(swpb %s)", srcsym->symbolic,
+				    srcsym->symbolic);
+
 		} else
 			res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
 		break;
@@ -635,12 +700,22 @@ handle_double(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				ressym = symsprintf(0, 0x00ff,
-				    "(((%s) & 0xff) + ((%s) & 0xff)) & 0xff",
+				    "(& (+ (& %s 0xff) (& %s 0xff)) 0xff)",
 				    srcsym->symbolic, dstsym->symbolic);
-			else
-				ressym = symsprintf(0, 0xffff, "(%s) + (%s)",
-				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr(%s)",
+			else {
+				if (dstsym->symbol_mask == 0 &&
+				    dstsym->concrete == 0)
+					ressym = Xsymdup(srcsym);
+				else if (srcsym->symbol_mask == 0 &&
+				    srcsym->concrete == 0)
+					ressym = Xsymdup(dstsym);
+				else
+					ressym = symsprintf(0, 0xffff,
+					    "(+ %s %s)",
+					    srcsym->symbolic,
+					    dstsym->symbolic);
+			}
+			flagsym = symsprintf(0, 0xff, "(sr %s)",
 			    ressym->symbolic);
 		} else {
 			if (bw) {
@@ -678,13 +753,13 @@ handle_double(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				ressym = symsprintf(0, 0x00ff,
-				    "((~(%s) & 0xff) + ((%s) & 0xff) + 1) & 0xff",
+				    "(& (+ (& (~ %s) 0xff) (& %s 0xff) 1) 0xff)",
 				    srcsym->symbolic, dstsym->symbolic);
 			else
 				ressym = symsprintf(0, 0xffff,
-				    "(~(%s) & 0xffff) + (%s) + 1",
+				    "(+ (& (~ %s) 0xffff) %s 1)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr(%s)",
+			flagsym = symsprintf(0, 0xff, "(sr %s)",
 			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
@@ -706,13 +781,13 @@ handle_double(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				ressym = symsprintf(0, 0x00ff,
-				    "((~(%s) & 0xff) + ((%s) & 0xff) + 1) & 0xff",
+				    "(& (+ (& (~ %s) 0xff) (& %s 0xff) 1) 0xff)",
 				    srcsym->symbolic, dstsym->symbolic);
 			else
 				ressym = symsprintf(0, 0xffff,
-				    "(~(%s) & 0xffff) + (%s) + 1",
+				    "(+ (& (~ %s) 0xffff) %s 1)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr(%s)",
+			flagsym = symsprintf(0, 0xff, "(sr %s)",
 			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
@@ -774,13 +849,24 @@ handle_double(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				ressym = symsprintf(0, 0xff,
-				    "((%s) & 0xff) ^ ((%s) & 0xff)",
+				    "(^ (& %s 0xff) (& %s 0xff))",
 				    srcsym->symbolic, dstsym->symbolic);
-			else
-				ressym = symsprintf(0, 0xffff,
-				    "(%s) ^ (%s)",
-				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
+			else {
+				if (dstsym->symbol_mask == 0 &&
+				    dstsym->concrete == 0)
+					ressym = Xsymdup(srcsym);
+				else if (srcsym->symbol_mask == 0 &&
+				    srcsym->concrete == 0)
+					ressym = Xsymdup(dstsym);
+				else
+					ressym = symsprintf(
+					    srcsym->concrete ^ dstsym->concrete,
+					    srcsym->symbol_mask | dstsym->symbol_mask,
+					    "(^ %s %s)",
+					    srcsym->symbolic, dstsym->symbolic);
+			}
+
+			flagsym = symsprintf(0, 0xff, "(sr_and %s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum ^ srcnum;
@@ -798,19 +884,34 @@ handle_double(uint16_t instr)
 			    concrete0d = ~dstsym->concrete |
 				~dstsym->symbol_mask,
 			    concrete0 = concrete0s | concrete0d;
+
+			if (concrete0 == 0xffff || (bw && (concrete0 & 0xff) == 0xff)) {
+				res = 0;
+				andflags(res, &setflags, &clrflags);
+				break;
+			}
+
 			if (bw)
 				ressym = symsprintf(
 				    srcsym->concrete & dstsym->concrete & 0xff,
 				    0xff & ~concrete0,
-				    "(%s) & (%s) & 0xff",
+				    "(& %s %s 0xff)",
 				    srcsym->symbolic, dstsym->symbolic);
-			else
-				ressym = symsprintf(
-				    srcsym->concrete & dstsym->concrete,
-				    0xffff & ~concrete0,
-				    "(%s) & (%s)",
-				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
+			else {
+				if (srcsym->concrete == 0xffff &&
+				    srcsym->symbol_mask == 0)
+					ressym = Xsymdup(dstsym);
+				else if (dstsym->concrete == 0xffff &&
+				    dstsym->symbol_mask == 0)
+					ressym = Xsymdup(srcsym);
+				else
+					ressym = symsprintf(
+					    srcsym->concrete & dstsym->concrete,
+					    0xffff & ~concrete0,
+					    "(& %s %s)",
+					    srcsym->symbolic, dstsym->symbolic);
+			}
+			flagsym = symsprintf(0, 0xff, "(sr_and %s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum & srcnum;
@@ -1168,6 +1269,15 @@ print_regs(void)
 	for (unsigned i = 4; i < 8; i++)
 		printmemword("  ", (registers[SP] & 0xfffe) + 2*i);
 	printf("\n");
+
+	for (unsigned i = 0; i < 16; i++) {
+		if (!isregsym(i))
+			continue;
+
+		printf("r%d is symbolic:\n", i);
+		printsym(stdout, regsym(i));
+	}
+	printf("\n");
 }
 
 uint16_t
@@ -1277,6 +1387,7 @@ callgate(unsigned op)
 			struct symbol *s;
 
 			s = symsprintf(0, 0xff, "input[%d]", i);
+			s->inputofflo = i;
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
 		break;
@@ -1313,7 +1424,6 @@ win(void)
 	unlocked = true;
 }
 
-#ifndef AUTO_GETSN
 void
 getsn(uint16_t addr, uint16_t bufsz)
 {
@@ -1350,7 +1460,6 @@ getsn(uint16_t addr, uint16_t bufsz)
 out:
 	free(buf);
 }
-#endif
 
 bool
 isregsym(uint16_t reg)
@@ -1385,7 +1494,7 @@ ismemsym(uint16_t addr, uint16_t bw)
 struct symbol *
 memsym(uint16_t addr, uint16_t bw)
 {
-	struct symbol *b1, *b2 = NULL;
+	struct symbol *b1, *b2 = NULL, *res;
 	uint16_t symmask, concrete;
 
 	b1 = g_hash_table_lookup(memory_symbols, ptr(addr));
@@ -1398,15 +1507,18 @@ memsym(uint16_t addr, uint16_t bw)
 	ASSERT(b1 || b2, "memory is concrete");
 
 	if (b1 == NULL)
-		b1 = tsymsprintf(membyte(addr), 0xff, "%02x", membyte(addr));
+		b1 = tsymsprintf(membyte(addr), 0xff, "0x%02x", membyte(addr));
 	else if (b2 == NULL)
-		b2 = tsymsprintf(membyte(addr+1), 0xff, "%02x",
+		b2 = tsymsprintf(membyte(addr+1), 0xff, "0x%02x",
 		    membyte(addr+1));
 
 	symmask = (b2->symbol_mask << 8) | (b1->symbol_mask & 0xff);
 	concrete = (b2->concrete << 8) | (b1->concrete & 0xff);
-	return symsprintf(concrete, symmask,
-	    "((%s) << 8) | (%s)", b2->symbolic, b1->symbolic);
+	res = symsprintf(concrete, symmask, "(iword %d %d)", b1->inputofflo,
+	    b2->inputofflo);
+	res->inputofflo = b1->inputofflo;
+	res->inputoffhi = b2->inputofflo;
+	return res;
 }
 
 struct symbol *
@@ -1418,8 +1530,8 @@ symsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
 	int rc;
 
 	// hackhackhack
-	ASSERT(offsetof(struct symbol, symbolic) == 4, "hack");
-	sprintf(nfmt, "aaBB%s", fmt);
+	ASSERT(offsetof(struct symbol, symbolic) == 8, "hack");
+	sprintf(nfmt, "aaBBccDD%s", fmt);
 
 	va_start(ap, fmt);
 	rc = vasprintf(&asp, nfmt, ap);
@@ -1430,19 +1542,23 @@ symsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
 	res = (struct symbol *)asp; // hackhackhack
 	res->concrete = concrete;
 	res->symbol_mask = symmask;
+	res->inputoffhi = (uint16_t)-1;
+	res->inputofflo = (uint16_t)-1;
 	return res;
 }
 
 struct symbol *
 tsymsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
 {
-	static char tsym[84];
+	static char tsym[80 + sizeof(struct symbol)];
 	struct symbol *s;
 	va_list ap;
 
 	s = (struct symbol *)tsym;
 	s->concrete = concrete;
 	s->symbol_mask = symmask;
+	s->inputoffhi = (uint16_t)-1;
+	s->inputofflo = (uint16_t)-1;
 
 	va_start(ap, fmt);
 	vsnprintf(s->symbolic, 80, fmt, ap);
@@ -1496,10 +1612,32 @@ memwritesym(uint16_t addr, uint16_t bw, struct symbol *s)
 		return;
 	}
 
-	low = symsprintf(s->concrete & 0xff, s->symbol_mask & 0xff,
-	    "(%s) & 0xff", s->symbolic);
-	high = symsprintf(s->concrete >> 8, s->symbol_mask >> 8,
-	    "(%s) >> 8", s->symbolic);
-	g_hash_table_insert(memory_symbols, ptr(addr), low);
-	g_hash_table_insert(memory_symbols, ptr(addr+1), high);
+	if (s->inputofflo != 0xffff)
+		low = symsprintf(0, 0xff, "(input %d)", s->inputofflo);
+	else if ((memcmp(s, "(sr ", 4) == 0) || (memcmp(s, "(and_sr ", 8) == 0))
+		low = Xsymdup(s);
+	else
+		low = symsprintf(s->concrete & 0xff, s->symbol_mask & 0xff,
+		    "(& 0xff %s)", s->symbolic);
+	low->inputofflo = s->inputofflo;
+
+	if (s->inputoffhi != 0xffff)
+		high = symsprintf(0, 0xff, "(input %d)", s->inputoffhi);
+	else
+		high = symsprintf(s->concrete >> 8, s->symbol_mask >> 8,
+		    "(>> %s 8)", s->symbolic);
+	high->inputofflo = s->inputoffhi;
+
+	if (low->symbol_mask)
+		g_hash_table_insert(memory_symbols, ptr(addr), low);
+	else {
+		free(low);
+		g_hash_table_remove(memory_symbols, ptr(addr));
+	}
+	if (high->symbol_mask)
+		g_hash_table_insert(memory_symbols, ptr(addr+1), high);
+	else {
+		free(high);
+		g_hash_table_remove(memory_symbols, ptr(addr+1));
+	}
 }
