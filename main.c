@@ -222,6 +222,14 @@ handle_jump(uint16_t instr)
 		if (registers[SR] & SR_C)
 			shouldjump = true;
 		break;
+	case 0x5:
+		// JGE
+		{
+		bool N = !!(registers[SR] & SR_N),
+		     V = !!(registers[SR] & SR_V);
+		shouldjump = ((N ^ V) == 0);
+		}
+		break;
 	case 0x7:
 		// JMP
 		shouldjump = true;
@@ -888,7 +896,6 @@ abort_nodump(void)
 
 	print_regs();
 	print_ips();
-	abort();
 	exit(1);
 }
 
