@@ -371,8 +371,11 @@ handle_single(uint16_t instr)
 	case 0x080:
 		// SWPB (no flags)
 		if (srcsym) {
-			printf("XXX symbolic SWPB\n");
-			abort_nodump();
+			ressym = symsprintf(
+			    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
+			    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
+			    "((%s) << 8) | ((%s) >> 8)", srcsym->symbolic,
+			    srcsym->symbolic);
 		} else
 			res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
 		break;
