@@ -3,8 +3,8 @@
 uint16_t	 pc_start;
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
-struct symbol	*register_symbols[16];
-GHashTable	*memory_symbols;		// addr -> symbol*
+struct sexp	*register_symbols[16];
+GHashTable	*memory_symbols;		// addr -> sexp*
 uint64_t	 start;
 uint64_t	 insns;
 bool		 off;
@@ -13,6 +13,34 @@ bool		 ctrlc;
 
 FILE		*trace;
 static bool	 diverged;
+
+static struct sexp *
+bytemask(struct sexp *s)
+{
+	struct sexp *t = sexp_alloc(S_AND);
+
+	t->s_nargs = 2;
+	t->s_arg[0] = s;
+	t->s_arg[1] = sexp_imm_alloc(0xff);
+	return t;
+}
+
+struct sexp *
+mksexp(enum sexp_kind sk, unsigned nargs, ...)
+{
+	struct sexp *t = sexp_alloc(sk);
+	va_list ap;
+
+	ASSERT(nargs <= SEXP_MAXARGS, "xx");
+	t->s_nargs = nargs;
+
+	va_start(ap, nargs);
+	for (unsigned i = 0; i < nargs; i++)
+		t->s_arg[i] = va_arg(ap, struct sexp *);
+	va_end(ap);
+
+	return t;
+}
 
 void
 print_ips(void)
@@ -36,7 +64,7 @@ init(void)
 	off = unlocked = false;
 	start = now();
 	memset(memory, 0, sizeof(memory));
-	memory_symbols = g_hash_table_new_full(NULL, NULL, NULL, free);
+	memory_symbols = g_hash_table_new(NULL, NULL);
 	ASSERT(memory_symbols, "g_hash");
 
 	memset(registers, 0, sizeof registers);
@@ -62,6 +90,7 @@ destroy(void)
 	}
 }
 
+#ifndef EMU_CHECK
 static void
 ctrlc_handler(int s)
 {
@@ -70,7 +99,6 @@ ctrlc_handler(int s)
 	ctrlc = true;
 }
 
-#ifndef EMU_CHECK
 int
 main(int argc, char **argv)
 {
@@ -110,6 +138,23 @@ main(int argc, char **argv)
 }
 #endif
 
+static bool
+sexpdepth(struct sexp *s, unsigned max)
+{
+
+	if (max == 0)
+		return true;
+
+	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
+		return false;
+
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		if (sexpdepth(s->s_arg[i], max - 1))
+			return true;
+
+	return false;
+}
+
 void
 emulate1(void)
 {
@@ -140,6 +185,8 @@ emulate1(void)
 	    memword(registers[PC]+2) == 0x23fe) {
 		insns += (2ul * registers[15]) + 1;
 		registers[15] = 0;
+
+		ASSERT(!isregsym(SR), "TODO");
 		registers[SR] &= ~(SR_C | SR_N | SR_V);
 		registers[SR] |= SR_Z;
 		registers[PC] += 4;
@@ -151,10 +198,10 @@ emulate1(void)
 		printf("mov @r14+, 0x0(r13)\n");
 		printf("r13 sym? %d\n", isregsym(13));
 		if (isregsym(13))
-			printsym(stdout, regsym(13));
+			printsym(regsym(13));
 		printf("r14 sym? %d\n", isregsym(14));
 		if (isregsym(14))
-			printsym(stdout, regsym(14));
+			printsym(regsym(14));
 		print_regs();
 		print_ips();
 	}
@@ -176,9 +223,9 @@ emulate1(void)
 		if (!isregsym(i))
 			continue;
 
-		if (strlen(regsym(i)->symbolic) > 48) {
+		if (sexpdepth(regsym(i), 10)) {
 			printf("r%d is *too* symbolic:\n", i);
-			printsym(stdout, regsym(i));
+			printsym(regsym(i));
 			off = true;
 		}
 	}
@@ -221,7 +268,7 @@ emulate(void)
 		if (registers[PC] == 0x0010) {
 			if (isregsym(SR)) {
 				printf("Symbolic interrupt!!!\nSR =>");
-				printsym(stdout, regsym(SR));
+				printsym(regsym(SR));
 				abort_nodump();
 			}
 
@@ -288,7 +335,7 @@ handle_jump(uint16_t instr)
 
 	if (cnd != 0x7 && isregsym(SR)) {
 		printf("XXX symbolic branch\nSR: ");
-		printsym(stdout, regsym(SR));
+		printsym(regsym(SR));
 		abort_nodump();
 	}
 
@@ -342,11 +389,11 @@ handle_single(uint16_t instr)
 		 bw = bits(instr, 6, 6),
 		 As = bits(instr, 5, 4),
 		 dsrc = bits(instr, 3, 0),
-		 srcval, srcnum, dstval;
+		 srcval, srcnum = 0, dstval;
 	unsigned res = (uns)-1;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	struct symbol *srcsym = NULL, *ressym = NULL, *flagsym = NULL;
+	struct sexp *srcsym = NULL, *ressym = NULL, *flagsym = NULL;
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
@@ -390,19 +437,16 @@ handle_single(uint16_t instr)
 	case 0x000:
 		// RRC
 		if (srcsym) {
-			// Could be less symbolic
 			if (bw)
-				ressym = symsprintf(0, 0x007f,
-				    "((%s) & 0xff) >> 1", srcsym->symbolic);
-			else
-				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
-				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr_rrc(%s)",
-			    ressym->symbolic);
+				srcsym = peephole(bytemask(srcsym));
+			ressym = mksexp(S_RSHIFT, 2, srcsym, 1);
+			flagsym = mksexp(S_SR_RRC, 1, peephole(ressym));
 		} else {
 			if (bw)
 				srcnum &= 0xff;
 			res = srcnum >> 1;
+
+			ASSERT(!isregsym(SR), "TODO");
 			if (registers[SR] & SR_C) {
 				if (bw)
 					res |= 0x80;
@@ -425,54 +469,22 @@ handle_single(uint16_t instr)
 	case 0x080:
 		// SWPB (no flags)
 		if (srcsym) {
-			if (srcsym->inputofflo != 0xffff &&
-			    srcsym->inputoffhi != 0xffff) {
-				if (srcsym->inputofflo == srcsym->inputoffhi - 1)
-					ressym = symsprintf(
-					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
-					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
-					    "(iword %d %d)",
-					    srcsym->inputoffhi,
-					    srcsym->inputofflo);
-				else if (srcsym->inputofflo == srcsym->inputoffhi + 1)
-					ressym = symsprintf(
-					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
-					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
-					    "(iword %d %d)",
-					    srcsym->inputofflo,
-					    srcsym->inputoffhi);
-				else {
-					ressym = symsprintf(
-					    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
-					    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
-					    "(swpb (| (<< (input %d) 8) (input %d)))",
-					    srcsym->inputoffhi, srcsym->inputofflo);
-					ASSERT(false, "weird");
-				}
-				ressym->inputoffhi = srcsym->inputofflo;
-				ressym->inputofflo = srcsym->inputoffhi;
-			} else
-				ressym = symsprintf(
-				    (srcsym->concrete << 8) | (srcsym->concrete >> 8),
-				    (srcsym->symbol_mask << 8) | (srcsym->symbol_mask >> 8),
-				    "(swpb %s)", srcsym->symbolic,
-				    srcsym->symbolic);
+			struct sexp *lo, *hi;
 
+			hi = mksexp(S_LSHIFT, 2, bytemask(srcsym), 8);
+			lo = mksexp(S_RSHIFT, 2, srcsym, 8);
+
+			ressym = mksexp(S_OR, 2, hi, lo);
 		} else
 			res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
 		break;
 	case 0x100:
 		// RRA (flags)
 		if (srcsym) {
-			// Could be less symbolic
 			if (bw)
-				ressym = symsprintf(0, 0x00ff,
-				    "((%s) & 0xff) / 2", srcsym->symbolic);
-			else
-				ressym = symsprintf(0, 0xffff, "(%s) / 2",
-				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr_rra(%s)",
-			    ressym->symbolic);
+				srcsym = peephole(bytemask(srcsym));
+			ressym = mksexp(S_RRA, 2, srcsym, 1);
+			flagsym = mksexp(S_SR_RRA, 1, ressym);
 		} else {
 			if (bw)
 				srcnum &= 0xff;
@@ -490,10 +502,8 @@ handle_single(uint16_t instr)
 	case 0x180:
 		// SXT (sets flags)
 		if (srcsym) {
-			ressym = symsprintf(0, 0xffff, "sxt(%s)",
-			    srcsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
-			    ressym->symbolic);
+			ressym = mksexp(S_SXT, 1, srcsym);
+			flagsym = mksexp(S_SR_AND, 1, ressym);
 		} else {
 			if (srcnum & 0x80)
 				res = srcnum | 0xff00;
@@ -510,14 +520,14 @@ handle_single(uint16_t instr)
 		dstkind = OP_MEM;
 
 		if (srcsym)
-			ressym = Xsymdup(srcsym);
+			ressym = srcsym;
 		else
 			res = srcnum;
 		break;
 	case 0x280:
 		// CALL (no flags)
 		if (srcsym) {
-			printf("XXX symbolic PUSH\n");
+			printf("XXX symbolic CALL\n");
 			abort_nodump();
 		} else {
 			// Call [src]
@@ -536,33 +546,28 @@ handle_single(uint16_t instr)
 	}
 
 	if (ressym) {
-		if (flagsym) {
-			if (isregsym(SR))
-				free(regsym(SR));
-			register_symbols[SR] = flagsym;
-		}
+		if (flagsym)
+			register_symbols[SR] = peephole(flagsym);
 
-		if (dstkind == OP_REG) {
-			if (isregsym(dstval))
-				free(regsym(dstval));
-
-			register_symbols[dstval] = ressym;
-		} else if (dstkind == OP_MEM) {
-			if (ismemsym(dstval, bw))
-				freememsyms(dstval, bw);
-
-			memwritesym(dstval, bw, ressym);
-		} else
+		if (dstkind == OP_REG)
+			register_symbols[dstval] = peephole(ressym);
+		else if (dstkind == OP_MEM)
+			memwritesym(dstval, bw, peephole(ressym));
+		else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
 	} else {
 		if (setflags || clrflags) {
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
 			if (isregsym(SR)) {
-				regsym(SR)->symbol_mask &= ~(setflags | clrflags);
-				regsym(SR)->concrete |= setflags;
-				regsym(SR)->concrete &= ~clrflags;
-				regsym(SR)->symbol_mask &= 0x1ff;
-				regsym(SR)->concrete &= 0x1ff;
+				struct sexp *s = sexp_alloc(S_OR), *t;
+				s->s_nargs = 2;
+				s->s_arg[0] = regsym(SR);
+				s->s_arg[1] = sexp_imm_alloc(setflags);
+				t = sexp_alloc(S_AND);
+				t->s_nargs = 2;
+				t->s_arg[0] = s;
+				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
+				register_symbols[SR] = t;
 			} else {
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
@@ -576,15 +581,13 @@ handle_single(uint16_t instr)
 			if (bw)
 				res &= 0x00ff;
 
-			if (isregsym(dstval)) {
-				free(regsym(dstval));
+			if (isregsym(dstval))
 				register_symbols[dstval] = NULL;
-			}
 
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
 			if (ismemsym(dstval, bw))
-				freememsyms(dstval, bw);
+				delmemsyms(dstval, bw);
 
 			if (bw)
 				memory[dstval] = (res & 0xff);
@@ -592,14 +595,6 @@ handle_single(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
-	}
-
-	for (unsigned i = 0; i < 16; i++) {
-		if (isregsym(i) && regsym(i)->symbol_mask == 0) {
-			registers[i] = regsym(i)->concrete;
-			free(register_symbols[i]);
-			register_symbols[i] = NULL;
-		}
 	}
 }
 
@@ -615,10 +610,10 @@ handle_double(uint16_t instr)
 	uint16_t srcval /*absolute addr or register number or constant*/,
 		 dstval /*absolute addr or register number*/;
 	unsigned res = (unsigned)-1,
-		 dstnum, srcnum /*as a number*/;
+		 dstnum = 0, srcnum = 0 /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	struct symbol *srcsym = NULL, *ressym = NULL, *dstsym = NULL,
+	struct sexp *srcsym = NULL, *ressym = NULL, *dstsym = NULL,
 		      *flagsym = NULL;
 
 	inc_reg(PC, 0);
@@ -682,41 +677,29 @@ handle_double(uint16_t instr)
 
 	// If either input is symbolic, both are. Put the other value in a
 	// temporary symbol.
-	if (srcsym && dstsym == NULL)
-		dstsym = tsymsprintf(dstnum, 0x0000, "%#04x", dstnum);
-	else if (dstsym && srcsym == NULL)
-		srcsym = tsymsprintf(srcnum, 0x0000, "%#04x", srcnum);
+	if (srcsym && dstsym == NULL) {
+		dstsym = sexp_imm_alloc(dstnum);
+	} else if (dstsym && srcsym == NULL) {
+		srcsym = sexp_imm_alloc(srcnum);
+	}
 
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
 		if (srcsym)
-			ressym = Xsymdup(srcsym);
+			ressym = srcsym;
 		else
 			res = srcnum;
 		break;
 	case 0x5000:
 		// ADD (flags)
 		if (srcsym) {
-			if (bw)
-				ressym = symsprintf(0, 0x00ff,
-				    "(& (+ (& %s 0xff) (& %s 0xff)) 0xff)",
-				    srcsym->symbolic, dstsym->symbolic);
-			else {
-				if (dstsym->symbol_mask == 0 &&
-				    dstsym->concrete == 0)
-					ressym = Xsymdup(srcsym);
-				else if (srcsym->symbol_mask == 0 &&
-				    srcsym->concrete == 0)
-					ressym = Xsymdup(dstsym);
-				else
-					ressym = symsprintf(0, 0xffff,
-					    "(+ %s %s)",
-					    srcsym->symbolic,
-					    dstsym->symbolic);
+			if (bw) {
+				srcsym = peephole(bytemask(srcsym));
+				dstsym = peephole(bytemask(dstsym));
 			}
-			flagsym = symsprintf(0, 0xff, "(sr %s)",
-			    ressym->symbolic);
+			ressym = peephole(mksexp(S_PLUS, 2, srcsym, dstsym));
+			flagsym = mksexp(S_SR, 1, ressym);
 		} else {
 			if (bw) {
 				dstnum &= 0xff;
@@ -740,6 +723,7 @@ handle_double(uint16_t instr)
 				dstnum &= 0xff;
 				srcnum &= 0xff;
 			}
+			ASSERT(!isregsym(SR), "TODO");
 			res = dstnum + srcnum + ((registers[SR] & SR_C) ? 1 : 0);
 			addflags(res, bw, &setflags, &clrflags);
 			if (bw)
@@ -751,16 +735,14 @@ handle_double(uint16_t instr)
 	case 0x8000:
 		// SUB (flags)
 		if (srcsym) {
-			if (bw)
-				ressym = symsprintf(0, 0x00ff,
-				    "(& (+ (& (~ %s) 0xff) (& %s 0xff) 1) 0xff)",
-				    srcsym->symbolic, dstsym->symbolic);
-			else
-				ressym = symsprintf(0, 0xffff,
-				    "(+ (& (~ %s) 0xffff) %s 1)",
-				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "(sr %s)",
-			    ressym->symbolic);
+			srcsym = mksexp(S_XOR, 2, srcsym, sexp_imm_alloc(0xffff));
+			if (bw) {
+				srcsym = peephole(bytemask(srcsym));
+				dstsym = peephole(bytemask(dstsym));
+			}
+			ressym = mksexp(S_PLUS, 3, srcsym, dstsym,
+			    sexp_imm_alloc(1));
+			flagsym = mksexp(S_SR, 1, peephole(ressym));
 		} else {
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
@@ -779,16 +761,14 @@ handle_double(uint16_t instr)
 		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
 		if (srcsym) {
-			if (bw)
-				ressym = symsprintf(0, 0x00ff,
-				    "(& (+ (& (~ %s) 0xff) (& %s 0xff) 1) 0xff)",
-				    srcsym->symbolic, dstsym->symbolic);
-			else
-				ressym = symsprintf(0, 0xffff,
-				    "(+ (& (~ %s) 0xffff) %s 1)",
-				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0xff, "(sr %s)",
-			    ressym->symbolic);
+			srcsym = mksexp(S_XOR, 2, srcsym, sexp_imm_alloc(0xffff));
+			if (bw) {
+				srcsym = peephole(bytemask(srcsym));
+				dstsym = peephole(bytemask(dstsym));
+			}
+			ressym = mksexp(S_PLUS, 3, srcsym, dstsym,
+			    sexp_imm_alloc(1));
+			flagsym = mksexp(S_SR, 1, peephole(ressym));
 		} else {
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
@@ -847,27 +827,12 @@ handle_double(uint16_t instr)
 	case 0xe000:
 		// XOR (flags)
 		if (srcsym) {
-			if (bw)
-				ressym = symsprintf(0, 0xff,
-				    "(^ (& %s 0xff) (& %s 0xff))",
-				    srcsym->symbolic, dstsym->symbolic);
-			else {
-				if (dstsym->symbol_mask == 0 &&
-				    dstsym->concrete == 0)
-					ressym = Xsymdup(srcsym);
-				else if (srcsym->symbol_mask == 0 &&
-				    srcsym->concrete == 0)
-					ressym = Xsymdup(dstsym);
-				else
-					ressym = symsprintf(
-					    srcsym->concrete ^ dstsym->concrete,
-					    srcsym->symbol_mask | dstsym->symbol_mask,
-					    "(^ %s %s)",
-					    srcsym->symbolic, dstsym->symbolic);
+			if (bw) {
+				srcsym = peephole(bytemask(srcsym));
+				dstsym = peephole(bytemask(dstsym));
 			}
-
-			flagsym = symsprintf(0, 0xff, "(sr_and %s)",
-			    ressym->symbolic);
+			ressym = mksexp(S_XOR, 2, srcsym, dstsym);
+			flagsym = mksexp(S_SR_AND, 1, peephole(ressym));
 		} else {
 			res = dstnum ^ srcnum;
 			if (bw)
@@ -878,41 +843,12 @@ handle_double(uint16_t instr)
 	case 0xf000:
 		// AND (flags)
 		if (srcsym) {
-			// Concrete 0s in src or dst are concrete 0s in result)
-			uint16_t concrete0s = ~srcsym->concrete | // 1s = 0s
-			    ~srcsym->symbol_mask,		  // 1s=concrete
-			    concrete0d = ~dstsym->concrete |
-				~dstsym->symbol_mask,
-			    concrete0 = concrete0s | concrete0d;
-
-			if (concrete0 == 0xffff || (bw && (concrete0 & 0xff) == 0xff)) {
-				res = 0;
-				andflags(res, &setflags, &clrflags);
-				break;
+			if (bw) {
+				srcsym = peephole(bytemask(srcsym));
+				dstsym = peephole(bytemask(dstsym));
 			}
-
-			if (bw)
-				ressym = symsprintf(
-				    srcsym->concrete & dstsym->concrete & 0xff,
-				    0xff & ~concrete0,
-				    "(& %s %s 0xff)",
-				    srcsym->symbolic, dstsym->symbolic);
-			else {
-				if (srcsym->concrete == 0xffff &&
-				    srcsym->symbol_mask == 0)
-					ressym = Xsymdup(dstsym);
-				else if (dstsym->concrete == 0xffff &&
-				    dstsym->symbol_mask == 0)
-					ressym = Xsymdup(srcsym);
-				else
-					ressym = symsprintf(
-					    srcsym->concrete & dstsym->concrete,
-					    0xffff & ~concrete0,
-					    "(& %s %s)",
-					    srcsym->symbolic, dstsym->symbolic);
-			}
-			flagsym = symsprintf(0, 0xff, "(sr_and %s)",
-			    ressym->symbolic);
+			ressym = mksexp(S_AND, 2, srcsym, dstsym);
+			flagsym = mksexp(S_SR_AND, 1, peephole(ressym));
 		} else {
 			res = dstnum & srcnum;
 			if (bw)
@@ -926,36 +862,33 @@ handle_double(uint16_t instr)
 	}
 
 	if (ressym) {
-		if (flagsym) {
-			if (isregsym(SR))
-				free(regsym(SR));
-			register_symbols[SR] = flagsym;
-		}
+		if (flagsym)
+			register_symbols[SR] = peephole(flagsym);
 
-		if (dstkind == OP_REG) {
-			if (isregsym(dstval))
-				free(regsym(dstval));
+		if (bw)
+			ressym = bytemask(ressym);
 
-			register_symbols[dstval] = ressym;
-		} else if (dstkind == OP_MEM) {
-			if (ismemsym(dstval, bw))
-				freememsyms(dstval, bw);
-
-			memwritesym(dstval, bw, ressym);
-		} else {
+		if (dstkind == OP_REG)
+			register_symbols[dstval] = peephole(ressym);
+		else if (dstkind == OP_MEM)
+			memwritesym(dstval, bw, peephole(ressym));
+		else {
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
-			free(ressym);
 			ressym = NULL;
 		}
 	} else {
 		if (setflags || clrflags) {
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
 			if (isregsym(SR)) {
-				regsym(SR)->symbol_mask &= ~(setflags | clrflags);
-				regsym(SR)->concrete |= setflags;
-				regsym(SR)->concrete &= ~clrflags;
-				regsym(SR)->symbol_mask &= 0x1ff;
-				regsym(SR)->concrete &= 0x1ff;
+				struct sexp *s = sexp_alloc(S_OR), *t;
+				s->s_nargs = 2;
+				s->s_arg[0] = regsym(SR);
+				s->s_arg[1] = sexp_imm_alloc(setflags);
+				t = sexp_alloc(S_AND);
+				t->s_nargs = 2;
+				t->s_arg[0] = s;
+				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
+				register_symbols[SR] = t;
 			} else {
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
@@ -969,15 +902,13 @@ handle_double(uint16_t instr)
 			if (bw)
 				res &= 0x00ff;
 
-			if (isregsym(dstval)) {
-				free(regsym(dstval));
+			if (isregsym(dstval))
 				register_symbols[dstval] = NULL;
-			}
 
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
 			if (ismemsym(dstval, bw))
-				freememsyms(dstval, bw);
+				delmemsyms(dstval, bw);
 
 			if (bw)
 				memory[dstval] = (res & 0xff);
@@ -985,14 +916,6 @@ handle_double(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
-	}
-
-	for (unsigned i = 0; i < 16; i++) {
-		if (isregsym(i) && regsym(i)->symbol_mask == 0) {
-			registers[i] = regsym(i)->concrete;
-			free(register_symbols[i]);
-			register_symbols[i] = NULL;
-		}
 	}
 }
 
@@ -1080,7 +1003,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 
 			if (isregsym(instr_decode_src)) {
 				printf("symbolic load reg(%u)\n", instr_decode_src);
-				printsym(stdout, regsym(instr_decode_src));
+				printsym(regsym(instr_decode_src));
 			}
 
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
@@ -1219,22 +1142,13 @@ printmemword(const char *pre, uint16_t addr)
 static void
 printreg(unsigned reg)
 {
-	struct symbol *r;
 
 	if (!isregsym(reg)) {
 		printf("%04x  ", registers[reg]);
 		return;
 	}
 
-	r = regsym(reg);
-	for (unsigned i = 0; i < 4; i++) {
-		uint16_t shift = 12 - (4*i);
-		if ((r->symbol_mask >> shift) & 0xf)
-			printf("?");
-		else
-			printf("%01x", (r->concrete >> shift) & 0xf);
-	}
-	printf("  ");
+	printf("????  ");
 }
 
 void
@@ -1275,7 +1189,7 @@ print_regs(void)
 			continue;
 
 		printf("r%d is symbolic:\n", i);
-		printsym(stdout, regsym(i));
+		printsym(regsym(i));
 	}
 	printf("\n");
 }
@@ -1284,6 +1198,7 @@ uint16_t
 sr_flags(void)
 {
 
+	ASSERT(!isregsym(SR), "TODO");
 	return registers[SR] & (SR_V | SR_CPUOFF | SR_N | SR_Z | SR_C);
 }
 
@@ -1383,13 +1298,14 @@ callgate(unsigned op)
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
 		//getsn(getsaddr, bufsz);
-		for (unsigned i = 0; i < bufsz; i++) {
-			struct symbol *s;
+		for (unsigned i = 0; i < (unsigned)bufsz - 1; i++) {
+			struct sexp *s;
 
-			s = symsprintf(0, 0xff, "input[%d]", i);
-			s->inputofflo = i;
+			s = sexp_alloc(S_INP);
+			s->s_nargs = i;
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
+		memory[((getsaddr + bufsz) & 0xffff) - 1] = 0;
 		break;
 	case 0x20:
 		// RNG
@@ -1464,16 +1380,16 @@ out:
 bool
 isregsym(uint16_t reg)
 {
-	struct symbol *r;
+	struct sexp *r;
 
 	r = register_symbols[reg];
 	return (r != NULL);
 }
 
-struct symbol *
+struct sexp *
 regsym(uint16_t reg)
 {
-	struct symbol *r;
+	struct sexp *r;
 
 	r = register_symbols[reg];
 	return r;
@@ -1482,7 +1398,7 @@ regsym(uint16_t reg)
 bool
 ismemsym(uint16_t addr, uint16_t bw)
 {
-	struct symbol *b1, *b2 = NULL;
+	struct sexp *b1, *b2 = NULL;
 
 	b1 = g_hash_table_lookup(memory_symbols, ptr(addr));
 	if (bw == 0)
@@ -1491,11 +1407,10 @@ ismemsym(uint16_t addr, uint16_t bw)
 	return (b1 || b2);
 }
 
-struct symbol *
+struct sexp *
 memsym(uint16_t addr, uint16_t bw)
 {
-	struct symbol *b1, *b2 = NULL, *res;
-	uint16_t symmask, concrete;
+	struct sexp *b1, *b2 = NULL;
 
 	b1 = g_hash_table_lookup(memory_symbols, ptr(addr));
 	if (bw)
@@ -1507,79 +1422,84 @@ memsym(uint16_t addr, uint16_t bw)
 	ASSERT(b1 || b2, "memory is concrete");
 
 	if (b1 == NULL)
-		b1 = tsymsprintf(membyte(addr), 0xff, "0x%02x", membyte(addr));
-	else if (b2 == NULL)
-		b2 = tsymsprintf(membyte(addr+1), 0xff, "0x%02x",
-		    membyte(addr+1));
+		b1 = sexp_imm_alloc(membyte(addr));
+	if (b2)
+		b2 = peephole(mksexp(S_LSHIFT, 2, b2, 8));
+	else
+		b2 = sexp_imm_alloc(membyte(addr+1) << 8);
 
-	symmask = (b2->symbol_mask << 8) | (b1->symbol_mask & 0xff);
-	concrete = (b2->concrete << 8) | (b1->concrete & 0xff);
-	res = symsprintf(concrete, symmask, "(iword %d %d)", b1->inputofflo,
-	    b2->inputofflo);
-	res->inputofflo = b1->inputofflo;
-	res->inputoffhi = b2->inputofflo;
-	return res;
-}
-
-struct symbol *
-symsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
-{
-	char nfmt[80] = { 0 }, *asp;
-	struct symbol *res;
-	va_list ap;
-	int rc;
-
-	// hackhackhack
-	ASSERT(offsetof(struct symbol, symbolic) == 8, "hack");
-	sprintf(nfmt, "aaBBccDD%s", fmt);
-
-	va_start(ap, fmt);
-	rc = vasprintf(&asp, nfmt, ap);
-	va_end(ap);
-
-	ASSERT(rc != -1, "oom");
-
-	res = (struct symbol *)asp; // hackhackhack
-	res->concrete = concrete;
-	res->symbol_mask = symmask;
-	res->inputoffhi = (uint16_t)-1;
-	res->inputofflo = (uint16_t)-1;
-	return res;
-}
-
-struct symbol *
-tsymsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
-{
-	static char tsym[80 + sizeof(struct symbol)];
-	struct symbol *s;
-	va_list ap;
-
-	s = (struct symbol *)tsym;
-	s->concrete = concrete;
-	s->symbol_mask = symmask;
-	s->inputoffhi = (uint16_t)-1;
-	s->inputofflo = (uint16_t)-1;
-
-	va_start(ap, fmt);
-	vsnprintf(s->symbolic, 80, fmt, ap);
-	va_end(ap);
-
-	return s;
+	return mksexp(S_OR, 2, b2, b1);
 }
 
 void
-printsym(FILE *f, struct symbol *sym)
+printsym(struct sexp *sym)
 {
 
 	if (sym == NULL)
 		return;
 
-	fprintf(f, "Symbolic value: %#04x  symbolic bits: %#04x\nSymbolic: %s\n",
-	    sym->concrete, sym->symbol_mask, sym->symbolic);
+	if (sym->s_kind == S_IMMEDIATE) {
+		printf("0x%04x", sym->s_nargs);
+		return;
+	}
+
+	if (sym->s_kind == S_INP) {
+		printf("Input[%d]", sym->s_nargs);
+		return;
+	}
+
+	printf("(");
+	switch (sym->s_kind) {
+	case S_OR:
+		printf("|");
+		break;
+	case S_XOR:
+		printf("^");
+		break;
+	case S_AND:
+		printf("&");
+		break;
+	case S_PLUS:
+		printf("+");
+		break;
+	case S_SR:
+		printf("sr");
+		break;
+	case S_SR_AND:
+		printf("sr-and");
+		break;
+	case S_SR_RRC:
+		printf("sr-rrc");
+		break;
+	case S_SR_RRA:
+		printf("sr-rra");
+		break;
+	case S_RSHIFT:
+		printf(">>");
+		ASSERT(sym->s_nargs == 2, "x");
+		break;
+	case S_LSHIFT:
+		printf("<<");
+		ASSERT(sym->s_nargs == 2, "x");
+		break;
+	case S_RRA:
+		printf(">>/");
+		ASSERT(sym->s_nargs == 2, "x");
+		break;
+	default:
+		ASSERT(false, "x");
+		break;
+	}
+
+	for (unsigned i = 0; i < sym->s_nargs; i++) {
+		printf(" ");
+		printsym(sym->s_arg[i]);
+	}
+	printf(")");
 }
 
 void
-freememsyms(uint16_t addr, uint16_t bw)
+delmemsyms(uint16_t addr, uint16_t bw)
 {
 
 	g_hash_table_remove(memory_symbols, ptr(addr));
@@ -1589,55 +1509,205 @@ freememsyms(uint16_t addr, uint16_t bw)
 }
 
 void
-memwritesym(uint16_t addr, uint16_t bw, struct symbol *s)
+memwritesym(uint16_t addr, uint16_t bw, struct sexp *s)
 {
-	struct symbol *low, *high;
-
-	if (bw)
-		s->symbol_mask &= 0xff;
-
-	// Don't write concrete "symbols"
-	if (s->symbol_mask == 0) {
-		freememsyms(addr, bw);
-		if (bw)
-			memory[addr] = s->concrete & 0xff;
-		else
-			memwriteword(addr, s->concrete);
-		free(s);
-		return;
-	}
+	struct sexp *low, *high;
 
 	if (bw) {
+		s = peephole(bytemask(s));
 		g_hash_table_insert(memory_symbols, ptr(addr), s);
 		return;
 	}
 
-	if (s->inputofflo != 0xffff)
-		low = symsprintf(0, 0xff, "(input %d)", s->inputofflo);
-	else if ((memcmp(s, "(sr ", 4) == 0) || (memcmp(s, "(and_sr ", 8) == 0))
-		low = Xsymdup(s);
-	else
-		low = symsprintf(s->concrete & 0xff, s->symbol_mask & 0xff,
-		    "(& 0xff %s)", s->symbolic);
-	low->inputofflo = s->inputofflo;
+	low = peephole(mksexp(S_AND, 2, s, sexp_imm_alloc(0xff)));
+	high = peephole(mksexp(S_RSHIFT, 2, s, sexp_imm_alloc(8)));
 
-	if (s->inputoffhi != 0xffff)
-		high = symsprintf(0, 0xff, "(input %d)", s->inputoffhi);
-	else
-		high = symsprintf(s->concrete >> 8, s->symbol_mask >> 8,
-		    "(>> %s 8)", s->symbolic);
-	high->inputofflo = s->inputoffhi;
+	g_hash_table_insert(memory_symbols, ptr(addr), low);
+	g_hash_table_insert(memory_symbols, ptr(addr+1), high);
+}
 
-	if (low->symbol_mask)
-		g_hash_table_insert(memory_symbols, ptr(addr), low);
-	else {
-		free(low);
-		g_hash_table_remove(memory_symbols, ptr(addr));
+static struct sexp *
+peep_constreduce(struct sexp *s, bool *changed)
+{
+
+	if (s->s_nargs < 2)
+		return s;
+
+	// (x imm imm) -> (x imm)
+	for (unsigned n = 3; n > 1; n--) {
+		if (s->s_nargs > n && s->s_arg[n-1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[n]->s_kind == S_IMMEDIATE) {
+			switch (s->s_kind) {
+			case S_PLUS:
+				s->s_nargs--;
+				s->s_arg[n-1]->s_nargs += s->s_arg[n]->s_nargs;
+				*changed = true;
+				break;
+			case S_OR:
+				s->s_nargs--;
+				s->s_arg[n-1]->s_nargs |= s->s_arg[n]->s_nargs;
+				*changed = true;
+				break;
+			case S_AND:
+				s->s_nargs--;
+				s->s_arg[n-1]->s_nargs &= s->s_arg[n]->s_nargs;
+				*changed = true;
+				break;
+			case S_XOR:
+				s->s_nargs--;
+				s->s_arg[n-1]->s_nargs ^= s->s_arg[n]->s_nargs;
+				*changed = true;
+				break;
+			default:
+				break;
+			}
+		}
 	}
-	if (high->symbol_mask)
-		g_hash_table_insert(memory_symbols, ptr(addr+1), high);
-	else {
-		free(high);
-		g_hash_table_remove(memory_symbols, ptr(addr+1));
+
+	// TODO (x imm) -> imm?
+
+	if (*changed)
+		return s;
+
+	if (s->s_nargs != 2)
+		return s;
+
+	if (s->s_arg[1]->s_kind != S_IMMEDIATE)
+		return s;
+
+	switch (s->s_kind) {
+	case S_AND:
+		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0) {
+			// (& x 0) -> 0
+			s = s->s_arg[1];
+			*changed = true;
+		} else if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0xffff) {
+			// (& x ffff) -> x
+			s = s->s_arg[0];
+			*changed = true;
+		}
+		break;
+	case S_XOR:
+		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0) {
+			// (^ x 0) -> x
+			s = s->s_arg[0];
+			*changed = true;
+		}
+		break;
+	case S_PLUS:
+		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0) {
+			// (+ x 0) -> x
+			s = s->s_arg[0];
+			*changed = true;
+		}
+		break;
+	case S_OR:
+		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0) {
+			// (| x 0) -> x
+			s = s->s_arg[0];
+			*changed = true;
+		} else if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[1]->s_nargs == 0xffff) {
+			// (| x ffff) -> ffff
+			s = s->s_arg[1];
+			*changed = true;
+		}
+		break;
+	default:
+		break;
 	}
+
+	return s;
+}
+
+static struct sexp *
+peep_expfirst(struct sexp *s, bool *changed)
+{
+
+	if (s->s_nargs < 2)
+		return s;
+
+	switch (s->s_kind) {
+	case S_PLUS:
+	case S_OR:
+	case S_AND:
+	case S_XOR:
+		if (s->s_arg[1]->s_kind == S_IMMEDIATE) {
+			struct sexp *t;
+
+			t = s->s_arg[2];
+			s->s_arg[2] = s->s_arg[1];
+			s->s_arg[1] = t;
+			*changed = true;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return s;
+}
+
+typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
+
+struct sexp *
+sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
+    bool *changed)
+{
+
+	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
+		return s;
+
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		s->s_arg[i] = sexpvisit(sk, nargs, s->s_arg[i], cb, changed);
+
+	if ((sk == s->s_kind || sk == S_MATCH_ANY) &&
+	    ((uns)nargs == s->s_nargs || nargs == -1))
+		s = cb(s, changed);
+
+	return s;
+}
+
+struct sexp *
+peephole(struct sexp *s)
+{
+#if 0
+	bool changed;
+
+	do {
+		changed = false;
+		s = sexpvisit(S_MATCH_ANY, -1, s, peep_expfirst, &changed);
+		s = sexpvisit(S_MATCH_ANY, -1, s, peep_constreduce, &changed);
+	} while (changed);
+#endif
+
+	return s;
+}
+
+struct sexp *
+sexp_alloc(enum sexp_kind skind)
+{
+	struct sexp *r;
+
+	r = malloc(sizeof *r);
+	ASSERT(r, "oom");
+	r->s_kind = skind;
+	return r;
+}
+
+struct sexp *
+sexp_imm_alloc(uint16_t n)
+{
+	struct sexp *r;
+
+	r = malloc(sizeof *r);
+	ASSERT(r, "oom");
+	r->s_kind = S_IMMEDIATE;
+	r->s_nargs = n;
+	return r;
 }

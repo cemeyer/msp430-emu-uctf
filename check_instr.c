@@ -1322,16 +1322,16 @@ START_TEST(test_symbolic)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	register_symbols[5] = symsprintf(0, 0xffff, "X");
+	register_symbols[5] = mksexp(S_INP, 1, 0);
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(isregsym(SR));
 	ck_assert(isregsym(5));
-	ck_assert(regsym(5)->symbol_mask == 0xffff);
-	ck_assert_str_eq("(0x1337) + (X)", regsym(5)->symbolic);
-	ck_assert_str_eq("sr((0x1337) + (X))", regsym(SR)->symbolic);
+	ck_assert(regsym(5)->s_kind == S_PLUS);
+	//ck_assert_str_eq("(0x1337) + (X)", regsym(5)->symbolic);
+	//ck_assert_str_eq("sr((0x1337) + (X))", regsym(SR)->symbolic);
 }
 END_TEST
 
@@ -1343,18 +1343,18 @@ START_TEST(test_symbolicb)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	register_symbols[5] = symsprintf(0, 0xffff, "X");
+	register_symbols[5] = mksexp(S_INP, 1, 0);
 
 	emulate1();
 
 	ck_assert(registers[PC] == CODE_STEP + 4);
 	ck_assert(isregsym(SR));
 	ck_assert(isregsym(5));
-	ck_assert(regsym(5)->symbol_mask == 0x00ff);
-	ck_assert_str_eq("(((0x37) & 0xff) + ((X) & 0xff)) & 0xff",
-	    regsym(5)->symbolic);
-	ck_assert_str_eq("sr((((0x37) & 0xff) + ((X) & 0xff)) & 0xff)",
-	    regsym(SR)->symbolic);
+	ck_assert(regsym(5)->s_kind == S_AND);
+	//ck_assert_str_eq("(((0x37) & 0xff) + ((X) & 0xff)) & 0xff",
+	//    regsym(5)->symbolic);
+	//ck_assert_str_eq("sr((((0x37) & 0xff) + ((X) & 0xff)) & 0xff)",
+	//    regsym(SR)->symbolic);
 }
 END_TEST
 

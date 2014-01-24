@@ -6,6 +6,7 @@
 #include <sys/cdefs.h>
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,11 +21,36 @@
 
 #define ARRAYLEN(arr) ((sizeof(arr)) / sizeof((arr)[0]))
 
+enum sexp_kind {
+	S_OR,
+	S_XOR,
+	S_AND,
+	S_PLUS,
+	S_IMMEDIATE,	// s_nargs -> value
+	S_SR,
+	S_SR_AND,
+	S_SR_RRC,
+	S_SR_RRA,
+	S_RSHIFT,
+	S_LSHIFT,
+	S_RRA,
+	S_INP,		// s_nargs -> index
+	S_MATCH_ANY,
+	S_SXT,
+};
+
+#define SEXP_MAXARGS 4
+struct sexp {
+	enum sexp_kind	 s_kind;
+	unsigned	 s_nargs;
+	struct sexp	*s_arg[SEXP_MAXARGS];
+};
+
 extern uint16_t		 pc_start;
 extern uint16_t		 registers[16];
 extern uint8_t		 memory[0x10000];
-extern struct symbol	*register_symbols[16];
-extern GHashTable	*memory_symbols;		// addr -> struct symbol*
+extern struct sexp	*register_symbols[16];
+extern GHashTable	*memory_symbols;		// addr -> struct sexp*
 extern bool		 off;
 extern bool		 unlocked;
 extern uint64_t		 insns;
@@ -81,25 +107,17 @@ typedef unsigned int uns;
 	abort_nodump(); \
 } while (false)
 
-struct symbol {
-	uint16_t concrete;
-	uint16_t symbol_mask;
-	uint16_t inputoffhi,
-		 inputofflo;
-	char symbolic[0];
-};
-
+struct sexp	*peephole(struct sexp *s);
 bool		 isregsym(uint16_t reg);
 bool		 ismemsym(uint16_t addr, uint16_t bw);
-struct symbol	*regsym(uint16_t reg);
-struct symbol	*memsym(uint16_t addr, uint16_t bw);
-struct symbol	*symsprintf(uint16_t concrete, uint16_t symmask,
-			    const char *fmt, ...);
-struct symbol	*tsymsprintf(uint16_t concrete, uint16_t symmask,
-			     const char *fmt, ...);
-void		 printsym(FILE *f, struct symbol *sym);
-void		 freememsyms(uint16_t addr, uint16_t bw);
-void		 memwritesym(uint16_t addr, uint16_t bw, struct symbol *s);
+struct sexp	*regsym(uint16_t reg);
+struct sexp	*memsym(uint16_t addr, uint16_t bw);
+void		 printsym(struct sexp *sym);
+void		 memwritesym(uint16_t addr, uint16_t bw, struct sexp *s);
+void		 delmemsyms(uint16_t addr, uint16_t bw);
+struct sexp	*mksexp(enum sexp_kind sk, unsigned nargs, ...);
+struct sexp	*sexp_alloc(enum sexp_kind skind);
+struct sexp	*sexp_imm_alloc(uint16_t n);
 
 void		 abort_nodump(void);
 void		 init(void);
@@ -140,17 +158,5 @@ void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
 		 enum operand_kind *dstkind);
 
 void	print_ips(void);
-
-static inline struct symbol *
-Xsymdup(const struct symbol *s)
-{
-	size_t t = sizeof(*s) + strlen(s->symbolic) + 1;
-	struct symbol *r;
-
-	r = malloc(t);
-	ASSERT(r, "oom");
-	memcpy(r, s, t);
-	return r;
-}
 
 #endif
