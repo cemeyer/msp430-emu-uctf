@@ -9,6 +9,7 @@ uint64_t	 start;
 uint64_t	 insns;
 bool		 off;
 bool		 unlocked;
+bool		 ctrlc;
 
 FILE		*trace;
 static bool	 diverged;
@@ -61,6 +62,14 @@ destroy(void)
 	}
 }
 
+static void
+ctrlc_handler(int s)
+{
+
+	(void)s;
+	ctrlc = true;
+}
+
 #ifndef EMU_CHECK
 int
 main(int argc, char **argv)
@@ -89,6 +98,8 @@ main(int argc, char **argv)
 	memwriteword(0x10, 0x4130); // callgate
 
 	fclose(romfile);
+
+	signal(SIGINT, ctrlc_handler);
 
 	emulate();
 	printf("Got CPUOFF, stopped.\n");
@@ -160,6 +171,11 @@ emulate(void)
 #endif
 
 	while (true) {
+		if (ctrlc) {
+			printf("Got ^C, stopping...\n");
+			abort_nodump();
+		}
+
 		if (isregsym(PC)) {
 			printf("symbolic PC\n");
 			abort_nodump();
@@ -344,7 +360,7 @@ handle_single(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
 				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr_rrc(%s)",
+			flagsym = symsprintf(0, 0xff, "sr_rrc(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw)
@@ -390,7 +406,7 @@ handle_single(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0xffff, "(%s) / 2",
 				    srcsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr_rra(%s)",
+			flagsym = symsprintf(0, 0xff, "sr_rra(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw)
@@ -411,7 +427,7 @@ handle_single(uint16_t instr)
 		if (srcsym) {
 			ressym = symsprintf(0, 0xffff, "sxt(%s)",
 			    srcsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			if (srcnum & 0x80)
@@ -624,7 +640,7 @@ handle_double(uint16_t instr)
 			else
 				ressym = symsprintf(0, 0xffff, "(%s) + (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
+			flagsym = symsprintf(0, 0xff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
 			if (bw) {
@@ -668,7 +684,7 @@ handle_double(uint16_t instr)
 				ressym = symsprintf(0, 0xffff,
 				    "(~(%s) & 0xffff) + (%s) + 1",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
+			flagsym = symsprintf(0, 0xff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
@@ -696,7 +712,7 @@ handle_double(uint16_t instr)
 				ressym = symsprintf(0, 0xffff,
 				    "(~(%s) & 0xffff) + (%s) + 1",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr(%s)",
+			flagsym = symsprintf(0, 0xff, "sr(%s)",
 			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
@@ -764,7 +780,7 @@ handle_double(uint16_t instr)
 				ressym = symsprintf(0, 0xffff,
 				    "(%s) ^ (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum ^ srcnum;
@@ -776,21 +792,25 @@ handle_double(uint16_t instr)
 	case 0xf000:
 		// AND (flags)
 		if (srcsym) {
-			// symbol_mask could be more concrete (concrete 0s in
-			// src / dst -> concrete 0s in result)
+			// Concrete 0s in src or dst are concrete 0s in result)
+			uint16_t concrete0s = ~srcsym->concrete | // 1s = 0s
+			    ~srcsym->symbol_mask,		  // 1s=concrete
+			    concrete0d = ~dstsym->concrete |
+				~dstsym->symbol_mask,
+			    concrete0 = concrete0s | concrete0d;
 			if (bw)
 				ressym = symsprintf(
 				    srcsym->concrete & dstsym->concrete & 0xff,
-				    0xff,
+				    0xff & ~concrete0,
 				    "(%s) & (%s) & 0xff",
 				    srcsym->symbolic, dstsym->symbolic);
 			else
 				ressym = symsprintf(
 				    srcsym->concrete & dstsym->concrete,
-				    0xffff,
+				    0xffff & ~concrete0,
 				    "(%s) & (%s)",
 				    srcsym->symbolic, dstsym->symbolic);
-			flagsym = symsprintf(0, 0x1ff, "sr_and(%s)",
+			flagsym = symsprintf(0, 0xff, "sr_and(%s)",
 			    ressym->symbolic);
 		} else {
 			res = dstnum & srcnum;
@@ -956,6 +976,12 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			break;
 		case AS_INDINC:
 			*srckind = OP_MEM;
+
+			if (isregsym(instr_decode_src)) {
+				printf("symbolic load reg(%u)\n", instr_decode_src);
+				printsym(stdout, regsym(instr_decode_src));
+			}
+
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
@@ -1251,7 +1277,7 @@ callgate(unsigned op)
 			struct symbol *s;
 
 			s = symsprintf(0, 0xff, "input[%d]", i);
-			g_hash_table_insert(memory_symbols, ptr(getsaddr), s);
+			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
 		break;
 	case 0x20:
@@ -1380,7 +1406,7 @@ memsym(uint16_t addr, uint16_t bw)
 	symmask = (b2->symbol_mask << 8) | (b1->symbol_mask & 0xff);
 	concrete = (b2->concrete << 8) | (b1->concrete & 0xff);
 	return symsprintf(concrete, symmask,
-	    "(%s) << 8 | (%s)", b2->symbolic, b1->symbolic);
+	    "((%s) << 8) | (%s)", b2->symbolic, b1->symbolic);
 }
 
 struct symbol *
