@@ -750,8 +750,22 @@ handle_double(uint16_t instr)
 	case 0xf000:
 		// AND (flags)
 		if (srcsym) {
-			printf("XXX symbolic AND -> SR\n");
-			abort_nodump();
+			// symbol_mask could be more concrete (concrete 0s in
+			// src / dst -> concrete 0s in result)
+			if (bw)
+				ressym = symsprintf(
+				    srcsym->concrete & dstsym->concrete & 0xff,
+				    0xff,
+				    "(%s) & (%s) & 0xff",
+				    srcsym->symbolic, dstsym->symbolic);
+			else
+				ressym = symsprintf(
+				    srcsym->concrete & dstsym->concrete,
+				    0xffff,
+				    "(%s) & (%s)",
+				    srcsym->symbolic, dstsym->symbolic);
+			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			    ressym->symbolic);
 		} else {
 			res = dstnum & srcnum;
 			if (bw)
