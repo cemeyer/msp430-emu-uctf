@@ -945,15 +945,18 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
 			*srckind = OP_MEM;
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
 			*srcval = (registers[instr_decode_src] + extensionword)
 			    & 0xffff;
 			break;
 		case AS_REGIND:
 			*srckind = OP_MEM;
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
 			*srcval = registers[instr_decode_src];
 			break;
 		case AS_INDINC:
 			*srckind = OP_MEM;
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
 			break;
@@ -993,8 +996,10 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 		extensionword = memword(registers[PC]);
 		inc_reg(PC, 0);
 
-		if (instr_decode_dst != SR)
+		if (instr_decode_dst != SR) {
+			ASSERT(!isregsym(instr_decode_dst), "symbolic load addr");
 			regval = registers[instr_decode_dst];
+		}
 
 		*dstkind = OP_MEM;
 		*dstval = (regval + extensionword) & 0xffff;
