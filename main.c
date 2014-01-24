@@ -105,7 +105,8 @@ emulate1(void)
 	instr = memword(registers[PC]);
 
 	// dec r15; jnz -2 busy loop
-	if (instr == 0x831f && memword(registers[PC]+2) == 0x23fe) {
+	if ((instr == 0x831f || instr == 0x533f) &&
+	    memword(registers[PC]+2) == 0x23fe) {
 		insns += (2ul * registers[15]) + 1;
 		registers[15] = 0;
 		registers[SR] &= ~(SR_C | SR_N | SR_V);
@@ -1106,7 +1107,7 @@ now(void)
 	rc = clock_gettime(CLOCK_REALTIME, &ts);
 	ASSERT(rc == 0, "clock_gettime: %d:%s", errno, strerror(errno));
 
-	return ((uint64_t)1000000 * ts.tv_sec + (ts.tv_nsec / 1000));
+	return ((uint64_t)sec * ts.tv_sec + (ts.tv_nsec / 1000));
 }
 
 void

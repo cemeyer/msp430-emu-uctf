@@ -67,6 +67,8 @@ extern bool		 unlocked;
 #define SR_Z      0x0002
 #define SR_C      0x0001
 
+#define sec       1000000ULL
+
 enum operand_kind {
 	OP_REG,		// reg direct
 	OP_MEM,		// immediate (inline), other mem indirects
