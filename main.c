@@ -408,8 +408,10 @@ handle_single(uint16_t instr)
 	case 0x180:
 		// SXT (sets flags)
 		if (srcsym) {
-			printf("XXX symbolic SXT\n");
-			abort_nodump();
+			ressym = symsprintf(0, 0xffff, "sxt(%s)",
+			    srcsym->symbolic);
+			flagsym = symsprintf(0, 0xffff, "sr_and(%s)",
+			    ressym->symbolic);
 		} else {
 			if (srcnum & 0x80)
 				res = srcnum | 0xff00;
