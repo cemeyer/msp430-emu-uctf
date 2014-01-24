@@ -23,8 +23,8 @@
 extern uint16_t		 pc_start;
 extern uint16_t		 registers[16];
 extern uint8_t		 memory[0x10000];
-extern char		*register_symbols[16];
-extern GHashTable	*memory_symbols;		// addr -> char*
+extern struct symbol	*register_symbols[16];
+extern GHashTable	*memory_symbols;		// addr -> struct symbol*
 extern bool		 off;
 extern bool		 unlocked;
 
@@ -80,15 +80,18 @@ typedef unsigned int uns;
 	abort_nodump(); \
 } while (false)
 
-static inline char *
-Xstrdup(const char *s)
-{
-	char *r;
+struct symbol {
+	uint16_t concrete;
+	uint16_t symbol_mask;
+	char symbolic[0];
+};
 
-	r = strdup(s);
-	ASSERT(r, "oom");
-	return r;
-}
+bool		 isregsym(uint16_t reg);
+bool		 ismemsym(uint16_t addr, uint16_t bw);
+struct symbol	*regsym(uint16_t reg);
+struct symbol	*memsym(uint16_t addr, uint16_t bw);
+struct symbol	*symsprintf(uint16_t concrete, uint16_t symmask,
+			    const char *fmt, ...);
 
 void		 abort_nodump(void);
 void		 init(void);
@@ -97,6 +100,7 @@ void		 win(void);
 void		 destroy(void);
 void		 emulate(void);
 void		 emulate1(void);
+uint16_t	 membyte(uint16_t addr);
 uint16_t	 memword(uint16_t addr);
 void		 memwriteword(uint16_t addr, uint16_t word);
 void		 mem2reg(uint16_t addr, unsigned reg);
@@ -126,5 +130,17 @@ void	load_src(uint16_t instr, uint16_t instr_decode_src,
 void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
 		 uint16_t Ad, uint16_t *dstval,
 		 enum operand_kind *dstkind);
+
+static inline struct symbol *
+Xsymdup(const struct symbol *s)
+{
+	size_t t = sizeof(*s) + strlen(s->symbolic) + 1;
+	struct symbol *r;
+
+	r = malloc(t);
+	ASSERT(r, "oom");
+	memcpy(r, s, t);
+	return r;
+}
 
 #endif

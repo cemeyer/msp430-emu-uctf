@@ -3,8 +3,8 @@
 uint16_t	 pc_start;
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
-char		*register_symbols[16];
-GHashTable	*memory_symbols;		// addr -> char*
+struct symbol	*register_symbols[16];
+GHashTable	*memory_symbols;		// addr -> symbol*
 uint64_t	 start;
 uint64_t	 insns;
 bool		 off;
@@ -285,7 +285,7 @@ handle_single(uint16_t instr)
 	unsigned res = 0x10000;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	char *srcsym = NULL, *ressym = NULL;
+	struct symbol *srcsym = NULL, *ressym = NULL;
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
@@ -306,7 +306,7 @@ handle_single(uint16_t instr)
 			srcsym = memsym(srcval, bw);
 		else {
 			if (bw)
-				srcnum = memory[srcval];
+				srcnum = membyte(srcval);
 			else
 				srcnum = memword(srcval);
 		}
@@ -445,7 +445,7 @@ handle_single(uint16_t instr)
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
 			if (bw)
-				memory[dstval] = res & 0xff;
+				memory[dstval] = (res & 0xff);
 			else
 				memwriteword(dstval, res);
 		} else
@@ -468,7 +468,7 @@ handle_double(uint16_t instr)
 		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	char *srcsym = NULL, *ressym = NULL, *dstsym = NULL;
+	struct symbol *srcsym = NULL, *ressym = NULL, *dstsym = NULL;
 
 	inc_reg(PC, 0);
 
@@ -490,7 +490,7 @@ handle_double(uint16_t instr)
 			srcsym = memsym(srcval, bw);
 		else {
 			if (bw)
-				srcnum = memory[srcval];
+				srcnum = membyte(srcval);
 			else
 				srcnum = memword(srcval);
 		}
@@ -516,7 +516,7 @@ handle_double(uint16_t instr)
 			dstsym = memsym(dstval, bw);
 		else {
 			if (bw)
-				dstnum = memory[dstval];
+				dstnum = membyte(dstval);
 			else
 				dstnum = memword(dstval);
 		}
@@ -533,7 +533,7 @@ handle_double(uint16_t instr)
 	case 0x4000:
 		// MOV (no flags)
 		if (srcsym)
-			ressym = Xstrdup(srcsym);
+			ressym = Xsymdup(srcsym);
 		else
 			res = srcnum;
 		break;
@@ -699,7 +699,7 @@ handle_double(uint16_t instr)
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
 			if (bw)
-				memory[dstval] = res & 0xff;
+				memory[dstval] = (res & 0xff);
 			else
 				memwriteword(dstval, res);
 		} else
@@ -860,15 +860,20 @@ _illins(const char *f, unsigned l, uint16_t instr)
 }
 
 uint16_t
+membyte(uint16_t addr)
+{
+
+	ASSERT(!ismemsym(addr, 1), "wrong api for symbolic load");
+	return memory[addr];
+}
+
+uint16_t
 memword(uint16_t addr)
 {
 
 	ASSERT((addr & 0x1) == 0, "word load unaligned: %#04x",
 	    (unsigned)addr);
-	ASSERT(g_hash_table_lookup(memory_symbols, ptr(addr)) == NULL,
-	    "non-symbolic load");
-	ASSERT(g_hash_table_lookup(memory_symbols, ptr(addr + 1)) == NULL,
-	    "non-symbolic load");
+	ASSERT(!ismemsym(addr, 0), "wrong api for symbolic load");
 	return memory[addr] | ((uint16_t)memory[addr+1] << 8);
 }
 
@@ -1007,7 +1012,7 @@ callgate(unsigned op)
 	switch (op) {
 	case 0x0:
 #ifndef QUIET
-		putchar((char)memory[argaddr]);
+		putchar((char)membyte(argaddr));
 #endif
 		break;
 	case 0x2:
@@ -1100,3 +1105,92 @@ out:
 	free(buf);
 }
 #endif
+
+bool
+isregsym(uint16_t reg)
+{
+	struct symbol *r;
+
+	r = register_symbols[reg];
+	return (r != NULL);
+}
+
+struct symbol *
+regsym(uint16_t reg)
+{
+	struct symbol *r;
+
+	r = register_symbols[reg];
+	return r;
+}
+
+bool
+ismemsym(uint16_t addr, uint16_t bw)
+{
+	struct symbol *b1, *b2 = NULL;
+
+	b1 = g_hash_table_lookup(memory_symbols, ptr(addr));
+	if (bw == 0)
+		b2 = g_hash_table_lookup(memory_symbols, ptr(addr + 1));
+
+	return (b1 || b2);
+}
+
+struct symbol *
+memsym(uint16_t addr, uint16_t bw)
+{
+	struct symbol *b1, *b2 = NULL;
+	uint16_t symmask, concrete;
+
+	b1 = g_hash_table_lookup(memory_symbols, ptr(addr));
+	if (bw)
+		return b1;
+
+	ASSERT((addr & 1) == 0, "unaligned word read");
+	b2 = g_hash_table_lookup(memory_symbols, ptr(addr + 1));
+
+	ASSERT(b1 || b2, "memory is concrete");
+
+	if (b1 == NULL && b2) {
+		symmask = b2->symbol_mask << 8;
+		concrete = (b2->concrete << 8) | membyte(addr);
+
+		return symsprintf(concrete, symmask, "(%s) << 8) | %#02x",
+		    b2->symbolic, (uns)membyte(addr));
+	} else if (!b2 && b1) {
+		symmask = b1->symbol_mask & 0x00ff;
+		concrete = (b1->concrete & 0xff) | (membyte(addr+1) << 8);
+
+		return symsprintf(concrete, symmask, "%#04x | (%s)",
+		    (uns)membyte(addr+1) << 8, b1->symbolic);
+	}
+	// Both symbolic?
+	symmask = (b2->symbol_mask << 8) | (b1->symbol_mask & 0xff);
+	concrete = (b2->concrete << 8) | (b1->concrete & 0xff);
+	return symsprintf(concrete, symmask,
+	    "(%s) << 8 | (%s)", b2->symbolic, b1->symbolic);
+}
+
+struct symbol *
+symsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
+{
+	char nfmt[80] = { 0 }, *asp;
+	struct symbol *res;
+	va_list ap;
+	int rc;
+
+	// hackhackhack
+	ASSERT(offsetof(struct symbol, symbolic) == 4, "hack");
+	sprintf(nfmt, "aaBB%s", fmt);
+
+	va_start(ap, fmt);
+	rc = vasprintf(&asp, nfmt, ap);
+	va_end(ap);
+
+	ASSERT(rc != -1, "oom");
+
+	res = (struct symbol *)asp; // hackhackhack
+	res->concrete = concrete;
+	res->symbol_mask = symmask;
+	return res;
+}
