@@ -659,8 +659,16 @@ handle_double(uint16_t instr)
 	case 0x8000:
 		// SUB (flags)
 		if (srcsym) {
-			printf("XXX symbolic SUB ->SR\n");
-			abort_nodump();
+			if (bw)
+				ressym = symsprintf(0, 0x00ff,
+				    "((~(%s) & 0xff) + ((%s) & 0xff) + 1) & 0xff",
+				    srcsym->symbolic, dstsym->symbolic);
+			else
+				ressym = symsprintf(0, 0xffff,
+				    "(~(%s) & 0xffff) + (%s) + 1",
+				    srcsym->symbolic, dstsym->symbolic);
+			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			    ressym->symbolic);
 		} else {
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
