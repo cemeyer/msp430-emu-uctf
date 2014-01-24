@@ -411,15 +411,14 @@ handle_single(uint16_t instr)
 		break;
 	case 0x200:
 		// PUSH (no flags)
-		if (srcsym) {
-			printf("XXX symbolic PUSH\n");
-			abort_nodump();
-		} else {
+		dec_reg(SP, 0);
+		dstval = registers[SP];
+		dstkind = OP_MEM;
+
+		if (srcsym)
+			ressym = Xsymdup(srcsym);
+		else
 			res = srcnum;
-			dec_reg(SP, 0);
-			dstval = registers[SP];
-			dstkind = OP_MEM;
-		}
 		break;
 	case 0x280:
 		// CALL (no flags)
@@ -463,10 +462,18 @@ handle_single(uint16_t instr)
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
 	} else {
 		if (setflags || clrflags) {
-			ASSERT(!isregsym(SR), "set flags on symbolic SR");
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-			registers[SR] |= setflags;
-			registers[SR] &= ~clrflags;
+			if (isregsym(SR)) {
+				regsym(SR)->symbol_mask &= ~(setflags | clrflags);
+				regsym(SR)->concrete |= setflags;
+				regsym(SR)->concrete &= ~clrflags;
+				regsym(SR)->symbol_mask &= 0x1ff;
+				regsym(SR)->concrete &= 0x1ff;
+			} else {
+				registers[SR] |= setflags;
+				registers[SR] &= ~clrflags;
+				registers[SR] &= 0x1ff;
+			}
 		}
 
 		if (dstkind == OP_REG) {
@@ -491,6 +498,14 @@ handle_single(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
+	}
+
+	for (unsigned i = 0; i < 16; i++) {
+		if (isregsym(i) && regsym(i)->symbol_mask == 0) {
+			registers[i] = regsym(i)->concrete;
+			free(register_symbols[i]);
+			register_symbols[i] = NULL;
+		}
 	}
 }
 
@@ -760,10 +775,18 @@ handle_double(uint16_t instr)
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
 	} else {
 		if (setflags || clrflags) {
-			ASSERT(!isregsym(SR), "set flags on symbolic SR");
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-			registers[SR] |= setflags;
-			registers[SR] &= ~clrflags;
+			if (isregsym(SR)) {
+				regsym(SR)->symbol_mask &= ~(setflags | clrflags);
+				regsym(SR)->concrete |= setflags;
+				regsym(SR)->concrete &= ~clrflags;
+				regsym(SR)->symbol_mask &= 0x1ff;
+				regsym(SR)->concrete &= 0x1ff;
+			} else {
+				registers[SR] |= setflags;
+				registers[SR] &= ~clrflags;
+				registers[SR] &= 0x1ff;
+			}
 		}
 
 		if (dstkind == OP_REG) {
@@ -985,22 +1008,73 @@ abort_nodump(void)
 	exit(1);
 }
 
+static void
+printmemword(const char *pre, uint16_t addr)
+{
+
+	printf("%s", pre);
+	if (ismemsym(addr+1, 1))
+		printf("??");
+	else
+		printf("%02x", membyte(addr+1));
+	if (ismemsym(addr, 1))
+		printf("??");
+	else
+		printf("%02x", membyte(addr));
+}
+
+static void
+printreg(unsigned reg)
+{
+	struct symbol *r;
+
+	if (!isregsym(reg)) {
+		printf("%04x  ", registers[reg]);
+		return;
+	}
+
+	r = regsym(reg);
+	for (unsigned i = 0; i < 4; i++) {
+		uint16_t shift = 12 - (4*i);
+		if ((r->symbol_mask >> shift) & 0xf)
+			printf("?");
+		else
+			printf("%01x", (r->concrete >> shift) & 0xf);
+	}
+	printf("  ");
+}
+
 void
 print_regs(void)
 {
 
-	printf("pc  %04x  sp  %04x  sr  %04x  cg  0000\n", (uns)registers[PC],
-	    (uns)registers[SP], (uns)registers[SR]);
-	for (unsigned i = 4; i < 16; i += 4)
-		printf("r%02u %04x  r%02u %04x  r%02u %04x  r%02u %04x\n", i,
-		    (uns)registers[i], i + 1, (uns)registers[i+1], i + 2,
-		    (uns)registers[i+2], i + 3, (uns)registers[i+3]);
-	printf("stack:");
+	printf("pc  ");
+	printreg(PC);
+	printf("sp  ");
+	printreg(SP);
+	printf("sr  ");
+	printreg(SR);
+	printf("cg  ");
+	printreg(CG);
+	printf("\n");
+
+	for (unsigned i = 4; i < 16; i += 4) {
+		for (unsigned j = i; j < i + 4; j++) {
+			printf("r%02u ", j);
+			printreg(j);
+		}
+		printf("\n");
+	}
+
+	printf("instr:");
 	for (unsigned i = 0; i < 4; i++)
-		printf("  %04x", (uns)memword((registers[SP] & 0xfffe) + 2*i));
+		printmemword("  ", (pc_start & 0xfffe) + 2*i);
+	printf("\nstack:");
+	for (unsigned i = 0; i < 4; i++)
+		printmemword("  ", (registers[SP] & 0xfffe) + 2*i);
 	printf("\n      ");
 	for (unsigned i = 4; i < 8; i++)
-		printf("  %04x", (uns)memword((registers[SP] & 0xfffe) + 2*i));
+		printmemword("  ", (registers[SP] & 0xfffe) + 2*i);
 	printf("\n");
 }
 
@@ -1316,8 +1390,21 @@ memwritesym(uint16_t addr, uint16_t bw, struct symbol *s)
 {
 	struct symbol *low, *high;
 
-	if (bw) {
+	if (bw)
 		s->symbol_mask &= 0xff;
+
+	// Don't write concrete "symbols"
+	if (s->symbol_mask == 0) {
+		freememsyms(addr, bw);
+		if (bw)
+			memory[addr] = s->concrete & 0xff;
+		else
+			memwriteword(addr, s->concrete);
+		free(s);
+		return;
+	}
+
+	if (bw) {
 		g_hash_table_insert(memory_symbols, ptr(addr), s);
 		return;
 	}
