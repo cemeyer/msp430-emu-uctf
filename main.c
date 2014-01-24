@@ -1383,16 +1383,11 @@ printsym(FILE *f, struct symbol *sym)
 void
 freememsyms(uint16_t addr, uint16_t bw)
 {
-	void *v;
 
-	v = g_hash_table_lookup(memory_symbols, ptr(addr));
-	if (v)
-		free(v);
+	g_hash_table_remove(memory_symbols, ptr(addr));
 	if (bw)
 		return;
-	v = g_hash_table_lookup(memory_symbols, ptr(addr+1));
-	if (v)
-		free(v);
+	g_hash_table_remove(memory_symbols, ptr(addr+1));
 }
 
 void
