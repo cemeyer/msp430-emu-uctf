@@ -92,6 +92,11 @@ struct symbol	*regsym(uint16_t reg);
 struct symbol	*memsym(uint16_t addr, uint16_t bw);
 struct symbol	*symsprintf(uint16_t concrete, uint16_t symmask,
 			    const char *fmt, ...);
+struct symbol	*tsymsprintf(uint16_t concrete, uint16_t symmask,
+			     const char *fmt, ...);
+void		 printsym(FILE *f, struct symbol *sym);
+void		 freememsyms(uint16_t addr, uint16_t bw);
+void		 memwritesym(uint16_t addr, uint16_t bw, struct symbol *s);
 
 void		 abort_nodump(void);
 void		 init(void);

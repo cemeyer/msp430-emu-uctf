@@ -55,8 +55,8 @@ destroy(void)
 	memory_symbols = NULL;
 
 	for (unsigned reg = 0; reg < 16; reg++) {
-		if (register_symbols[reg])
-			free(register_symbols[reg]);
+		if (isregsym(reg))
+			free(regsym(reg));
 		register_symbols[reg] = NULL;
 	}
 }
@@ -166,6 +166,12 @@ emulate(void)
 		}
 
 		if (registers[PC] == 0x0010) {
+			if (isregsym(SR)) {
+				printf("Symbolic interrupt!!!\nSR =>");
+				printsym(stdout, regsym(SR));
+				abort_nodump();
+			}
+
 			// Callgate
 			if (registers[SR] & 0x8000) {
 				unsigned op = (registers[SR] >> 8) & 0x7f;
@@ -178,6 +184,7 @@ emulate(void)
 
 		emulate1();
 
+		ASSERT(!isregsym(CG), "CG symbolic");
 		ASSERT(registers[CG] == 0, "CG");
 		if (registers[SR] & SR_CPUOFF) {
 			off = true;
@@ -282,10 +289,10 @@ handle_single(uint16_t instr)
 		 As = bits(instr, 5, 4),
 		 dsrc = bits(instr, 3, 0),
 		 srcval, srcnum, dstval;
-	unsigned res = 0x10000;
+	unsigned res = (uns)-1;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	struct symbol *srcsym = NULL, *ressym = NULL;
+	struct symbol *srcsym = NULL, *ressym = NULL, *flagsym = NULL;
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
@@ -329,8 +336,15 @@ handle_single(uint16_t instr)
 	case 0x000:
 		// RRC
 		if (srcsym) {
-			printf("XXX symbolic RRC\n");
-			abort_nodump();
+			// Could be less symbolic
+			if (bw)
+				ressym = symsprintf(0, 0x007f,
+				    "((%s) & 0xff) >> 1", srcsym);
+			else
+				ressym = symsprintf(0, 0x7fff, "(%s) >> 1",
+				    srcsym);
+			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			    ressym->symbolic);
 		} else {
 			if (bw)
 				srcnum &= 0xff;
@@ -429,21 +443,47 @@ handle_single(uint16_t instr)
 	}
 
 	if (ressym) {
-		// TODO XXX
-		abort_nodump();
-	} else {
-		ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-		registers[SR] |= setflags;
-		registers[SR] &= ~clrflags;
+		if (flagsym && isregsym(SR)) {
+			free(regsym(SR));
+			register_symbols[SR] = flagsym;
+		}
 
 		if (dstkind == OP_REG) {
-			ASSERT(res != 0x10000, "res never set");
+			if (isregsym(dstval))
+				free(regsym(dstval));
+
+			register_symbols[dstval] = ressym;
+		} else if (dstkind == OP_MEM) {
+			if (ismemsym(dstval, bw))
+				freememsyms(dstval, bw);
+
+			memwritesym(dstval, bw, ressym);
+		} else
+			ASSERT(dstkind == OP_FLAGSONLY, "x");
+	} else {
+		if (setflags || clrflags) {
+			ASSERT(!isregsym(SR), "set flags on symbolic SR");
+			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+			registers[SR] |= setflags;
+			registers[SR] &= ~clrflags;
+		}
+
+		if (dstkind == OP_REG) {
+			ASSERT(res != (uns)-1, "res never set");
 
 			if (bw)
 				res &= 0x00ff;
 
+			if (isregsym(dstval)) {
+				free(regsym(dstval));
+				register_symbols[dstval] = NULL;
+			}
+
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
+			if (ismemsym(dstval, bw))
+				freememsyms(dstval, bw);
+
 			if (bw)
 				memory[dstval] = (res & 0xff);
 			else
@@ -468,7 +508,8 @@ handle_double(uint16_t instr)
 		 dstnum, srcnum /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
-	struct symbol *srcsym = NULL, *ressym = NULL, *dstsym = NULL;
+	struct symbol *srcsym = NULL, *ressym = NULL, *dstsym = NULL,
+		      *flagsym = NULL;
 
 	inc_reg(PC, 0);
 
@@ -529,6 +570,13 @@ handle_double(uint16_t instr)
 		break;
 	}
 
+	// If either input is symbolic, both are. Put the other value in a
+	// temporary symbol.
+	if (srcsym && dstsym == NULL)
+		dstsym = tsymsprintf(dstnum, 0x0000, "%#04x", dstnum);
+	else if (dstsym && srcsym == NULL)
+		srcsym = tsymsprintf(srcnum, 0x0000, "%#04x", srcnum);
+
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
@@ -539,9 +587,17 @@ handle_double(uint16_t instr)
 		break;
 	case 0x5000:
 		// ADD (flags)
-		if (srcsym || dstsym) {
-			printf("XXX symbolic ADD ->SR\n");
-			abort_nodump();
+		if (srcsym) {
+			// TODO could be less symbolic
+			if (bw)
+				ressym = symsprintf(0, 0x00ff,
+				    "(((%s) & 0xff) + ((%s) & 0xff)) & 0xff",
+				    srcsym, dstsym);
+			else
+				ressym = symsprintf(0, 0xffff, "(%s) + (%s)",
+				    srcsym, dstsym);
+			flagsym = symsprintf(0, 0xffff, "sr(%s)",
+			    ressym->symbolic);
 		} else {
 			if (bw) {
 				dstnum &= 0xff;
@@ -557,7 +613,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0x6000:
 		// ADDC (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic ADDC ->SR\n");
 			abort_nodump();
 		} else {
@@ -575,7 +631,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0x8000:
 		// SUB (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic SUB ->SR\n");
 			abort_nodump();
 		} else {
@@ -594,7 +650,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0x9000:
 		// CMP (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic CMP ->SR\n");
 			abort_nodump();
 		} else {
@@ -614,7 +670,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0xa000:
 		// DADD (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic DADD ->SR\n");
 			abort_nodump();
 		} else {
@@ -647,7 +703,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0xd000:
 		// BIS (no flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic BIS\n");
 			abort_nodump();
 		} else
@@ -655,7 +711,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0xe000:
 		// XOR (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic XOR -> SR\n");
 			abort_nodump();
 		} else {
@@ -667,7 +723,7 @@ handle_double(uint16_t instr)
 		break;
 	case 0xf000:
 		// AND (flags)
-		if (srcsym || dstsym) {
+		if (srcsym) {
 			printf("XXX symbolic AND -> SR\n");
 			abort_nodump();
 		} else {
@@ -683,12 +739,30 @@ handle_double(uint16_t instr)
 	}
 
 	if (ressym) {
-		// TODO XXX
-		abort_nodump();
+		if (flagsym && isregsym(SR)) {
+			free(regsym(SR));
+			register_symbols[SR] = flagsym;
+		}
+
+		if (dstkind == OP_REG) {
+			if (isregsym(dstval))
+				free(regsym(dstval));
+
+			register_symbols[dstval] = ressym;
+		} else if (dstkind == OP_MEM) {
+			if (ismemsym(dstval, bw))
+				freememsyms(dstval, bw);
+
+			memwritesym(dstval, bw, ressym);
+		} else
+			ASSERT(dstkind == OP_FLAGSONLY, "x");
 	} else {
-		ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
-		registers[SR] |= setflags;
-		registers[SR] &= ~clrflags;
+		if (setflags || clrflags) {
+			ASSERT(!isregsym(SR), "set flags on symbolic SR");
+			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+			registers[SR] |= setflags;
+			registers[SR] &= ~clrflags;
+		}
 
 		if (dstkind == OP_REG) {
 			ASSERT(res != (unsigned)-1, "res never set");
@@ -696,8 +770,16 @@ handle_double(uint16_t instr)
 			if (bw)
 				res &= 0x00ff;
 
+			if (isregsym(dstval)) {
+				free(regsym(dstval));
+				register_symbols[dstval] = NULL;
+			}
+
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
+			if (ismemsym(dstval, bw))
+				freememsyms(dstval, bw);
+
 			if (bw)
 				memory[dstval] = (res & 0xff);
 			else
@@ -1024,14 +1106,10 @@ callgate(unsigned op)
 		bufsz = (uns)memword(argaddr+2);
 		//getsn(getsaddr, bufsz);
 		for (unsigned i = 0; i < bufsz; i++) {
-			char *s = NULL;
-			int rc;
+			struct symbol *s;
 
-			rc = asprintf(&s, "input[%d]", i);
-			ASSERT(rc != -1, "asprintf");
-			ASSERT(s, "oom");
-			g_hash_table_insert(memory_symbols,
-			    GINT_TO_POINTER(getsaddr), s);
+			s = symsprintf(0, 0xff, "input[%d]", i);
+			g_hash_table_insert(memory_symbols, ptr(getsaddr), s);
 		}
 		break;
 	case 0x20:
@@ -1151,20 +1229,12 @@ memsym(uint16_t addr, uint16_t bw)
 
 	ASSERT(b1 || b2, "memory is concrete");
 
-	if (b1 == NULL && b2) {
-		symmask = b2->symbol_mask << 8;
-		concrete = (b2->concrete << 8) | membyte(addr);
+	if (b1 == NULL)
+		b1 = tsymsprintf(membyte(addr), 0xff, "%02x", membyte(addr));
+	else if (b2 == NULL)
+		b2 = tsymsprintf(membyte(addr+1), 0xff, "%02x",
+		    membyte(addr+1));
 
-		return symsprintf(concrete, symmask, "(%s) << 8) | %#02x",
-		    b2->symbolic, (uns)membyte(addr));
-	} else if (!b2 && b1) {
-		symmask = b1->symbol_mask & 0x00ff;
-		concrete = (b1->concrete & 0xff) | (membyte(addr+1) << 8);
-
-		return symsprintf(concrete, symmask, "%#04x | (%s)",
-		    (uns)membyte(addr+1) << 8, b1->symbolic);
-	}
-	// Both symbolic?
 	symmask = (b2->symbol_mask << 8) | (b1->symbol_mask & 0xff);
 	concrete = (b2->concrete << 8) | (b1->concrete & 0xff);
 	return symsprintf(concrete, symmask,
@@ -1193,4 +1263,67 @@ symsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
 	res->concrete = concrete;
 	res->symbol_mask = symmask;
 	return res;
+}
+
+struct symbol *
+tsymsprintf(uint16_t concrete, uint16_t symmask, const char *fmt, ...)
+{
+	static char tsym[84];
+	struct symbol *s;
+	va_list ap;
+
+	s = (struct symbol *)tsym;
+	s->concrete = concrete;
+	s->symbol_mask = symmask;
+
+	va_start(ap, fmt);
+	vsnprintf(s->symbolic, 80, fmt, ap);
+	va_end(ap);
+
+	return s;
+}
+
+void
+printsym(FILE *f, struct symbol *sym)
+{
+
+	if (sym == NULL)
+		return;
+
+	fprintf(f, "Symbolic value: %#04x  symbolic bits: %#04x\nSymbolic: %s\n",
+	    sym->concrete, sym->symbol_mask, sym->symbolic);
+}
+
+void
+freememsyms(uint16_t addr, uint16_t bw)
+{
+	void *v;
+
+	v = g_hash_table_lookup(memory_symbols, ptr(addr));
+	if (v)
+		free(v);
+	if (bw)
+		return;
+	v = g_hash_table_lookup(memory_symbols, ptr(addr+1));
+	if (v)
+		free(v);
+}
+
+void
+memwritesym(uint16_t addr, uint16_t bw, struct symbol *s)
+{
+	struct symbol *low, *high;
+
+	if (bw) {
+		s->symbol_mask &= 0xff;
+		g_hash_table_insert(memory_symbols, ptr(addr), s);
+		return;
+	}
+
+	low = symsprintf(s->concrete & 0xff, s->symbol_mask & 0xff,
+	    "(%s) & 0xff", s->symbolic);
+	high = symsprintf(s->concrete >> 8, s->symbol_mask >> 8,
+	    "(%s) >> 8", s->symbolic);
+	g_hash_table_insert(memory_symbols, ptr(addr), low);
+	g_hash_table_insert(memory_symbols, ptr(addr+1), high);
 }
