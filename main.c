@@ -1431,7 +1431,7 @@ memsym(uint16_t addr, uint16_t bw)
 	if (b1 == NULL)
 		b1 = sexp_imm_alloc(membyte(addr));
 	if (b2)
-		b2 = peephole(mksexp(S_LSHIFT, 2, b2, 8));
+		b2 = peephole(mksexp(S_LSHIFT, 2, b2, &SEXP_8));
 	else
 		b2 = sexp_imm_alloc(membyte(addr+1) << 8);
 
@@ -1535,7 +1535,7 @@ memwritesym(uint16_t addr, uint16_t bw, struct sexp *s)
 	}
 
 	low = peephole(mksexp(S_AND, 2, s, sexp_imm_alloc(0xff)));
-	high = peephole(mksexp(S_RSHIFT, 2, s, sexp_imm_alloc(8)));
+	high = peephole(mksexp(S_RSHIFT, 2, s, &SEXP_8));
 
 	g_hash_table_insert(memory_symbols, ptr(addr), low);
 	g_hash_table_insert(memory_symbols, ptr(addr+1), high);
