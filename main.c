@@ -236,9 +236,17 @@ emulate1(void)
 		if (!isregsym(i))
 			continue;
 
-		if (sexpdepth(regsym(i), 10)) {
+		// concretify
+		if (regsym(i)->s_kind == S_IMMEDIATE) {
+			registers[i] = regsym(i)->s_nargs;
+			register_symbols[i] = NULL;
+			continue;
+		}
+
+		if (sexpdepth(regsym(i), 20)) {
 			printf("r%d is *too* symbolic:\n", i);
 			printsym(regsym(i));
+			printf("/r%d\n", i);
 			off = true;
 		}
 	}
@@ -1016,13 +1024,15 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
 			*srckind = OP_MEM;
-			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
+			    " (r%d)", instr_decode_src);
 			*srcval = (registers[instr_decode_src] + extensionword)
 			    & 0xffff;
 			break;
 		case AS_REGIND:
 			*srckind = OP_MEM;
-			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
+			    " (r%d)", instr_decode_src);
 			*srcval = registers[instr_decode_src];
 			break;
 		case AS_INDINC:
@@ -1033,7 +1043,8 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 				printsym(regsym(instr_decode_src));
 			}
 
-			ASSERT(!isregsym(instr_decode_src), "symbolic load addr");
+			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
+			    " (r%d)", instr_decode_src);
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
 			break;
@@ -1074,7 +1085,8 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 		inc_reg(PC, 0);
 
 		if (instr_decode_dst != SR) {
-			ASSERT(!isregsym(instr_decode_dst), "symbolic load addr");
+			ASSERT(!isregsym(instr_decode_dst), "symbolic load addr"
+			    " (r%d)", instr_decode_dst);
 			regval = registers[instr_decode_dst];
 		}
 
@@ -1217,6 +1229,7 @@ print_regs(void)
 
 		printf("r%d is symbolic:\n", i);
 		printsym(regsym(i));
+		printf("/r%d\n", i);
 	}
 	printf("\n");
 }
@@ -1513,6 +1526,10 @@ _printsym(struct sexp *sym, unsigned indent)
 	case S_RRA:
 		printf(">>/");
 		ASSERT(sym->s_nargs == 2, "x");
+		break;
+	case S_SXT:
+		printf("sxt");
+		ASSERT(sym->s_nargs == 1, "x");
 		break;
 	default:
 		ASSERT(false, "what kind is it? %d", sym->s_kind);
@@ -1967,6 +1984,109 @@ scan:
 	return s;
 }
 
+// move rra's inwards
+static struct sexp *
+peep_rra(struct sexp *s, bool *changed)
+{
+
+	ASSERT(s->s_arg[1]->s_kind == S_IMMEDIATE &&
+	    s->s_arg[1]->s_nargs == 1, "rra");
+
+	switch (s->s_arg[0]->s_kind) {
+	case S_OR:
+	case S_XOR:
+	case S_AND:
+	case S_PLUS:
+		break;
+	default:
+		return s;
+	}
+
+	*changed = true;
+	s = s->s_arg[0];
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		s->s_arg[i] = mksexp(S_RRA, 2, s->s_arg[i], &SEXP_1);
+	return s;
+}
+
+// move XOR's inwards
+static struct sexp *
+peep_xor(struct sexp *s, bool *changed)
+{
+	struct sexp *imm_s;
+
+	if (s->s_arg[1]->s_kind != S_IMMEDIATE)
+		return s;
+
+	switch (s->s_arg[0]->s_kind) {
+	case S_OR:
+	case S_AND:
+	case S_PLUS:
+		break;
+	default:
+		return s;
+	}
+
+	imm_s = sexp_imm_alloc(s->s_arg[1]->s_nargs);
+	*changed = true;
+
+	s = s->s_arg[0];
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		s->s_arg[i] = mksexp(S_XOR, 2, s->s_arg[i], imm_s);
+	return s;
+}
+
+// move imm ANDs inwards past ORs
+static struct sexp *
+peep_and(struct sexp *s, bool *changed)
+{
+	unsigned imm;
+	struct sexp *imm_s;
+
+	if (s->s_arg[1]->s_kind != S_IMMEDIATE)
+		return s;
+
+	if (s->s_arg[0]->s_kind != S_OR)
+		return s;
+
+	imm = s->s_arg[1]->s_nargs;
+	imm_s = sexp_imm_alloc(imm);
+
+	*changed = true;
+	s = s->s_arg[0];
+
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		s->s_arg[i] = mksexp(S_AND, 2, s->s_arg[i], imm_s);
+	return s;
+}
+
+// concretify what SR results we can
+static struct sexp *
+peep_sr(struct sexp *s, bool *changed)
+{
+	struct sexp *t;
+	bool carry = false;
+
+	t = s->s_arg[0];
+	if (t->s_kind != S_PLUS)
+		return s;
+
+scan:
+	for (unsigned i = 0; i < t->s_nargs; i++) {
+		if (t->s_arg[i]->s_kind == S_IMMEDIATE &&
+		    t->s_arg[i]->s_nargs == 0x10000) {
+			*changed = true;
+			sexpdelidx(t, i);
+			carry = true;
+			goto scan;
+		}
+	}
+
+	if (carry)
+		return mksexp(S_OR, 2, s, &SEXP_1);
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2009,6 +2129,10 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_OR, 2, s, peep_orjoin, &changed);
 		s = sexpvisit(S_AND, 2, s, peep_andorreduce, &changed);
 		s = sexpvisit(S_RSHIFT, 2, s, peep_rshiftcancel, &changed);
+		s = sexpvisit(S_RRA, 2, s, peep_rra, &changed);
+		s = sexpvisit(S_AND, 2, s, peep_and, &changed);
+		s = sexpvisit(S_XOR, 2, s, peep_xor, &changed);
+		s = sexpvisit(S_SR, 1, s, peep_sr, &changed);
 	} while (changed);
 
 	return s;
