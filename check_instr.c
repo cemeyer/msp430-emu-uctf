@@ -1453,6 +1453,31 @@ START_TEST(test_peephole4)
 }
 END_TEST
 
+START_TEST(test_peephole5)
+{
+	struct sexp *test =
+	    mksexp(S_AND, 2,
+		mksexp(S_OR, 2,
+		    mksexp(S_LSHIFT, 2,
+			mkinp(0),
+			sexp_imm_alloc(8)),
+		    mkinp(1)),
+		sexp_imm_alloc(0xff)),
+	    *res,
+	    *exp_res = test->s_arg[0]->s_arg[1];
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	// (& (| (<< S-Exp1 N) S-Exp2) M) -> S-Exp2 iff ((1<<N) & M) == 0
+	//
+	// Actually, -> (& S-Exp2 M). But in this case, S-Exp2 == Inp[1] and M
+	// == 0xff, and we can reduce (& Inp 0xff) to Inp.
+	ck_assert(res == exp_res);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1584,6 +1609,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole2);
 	tcase_add_test(tsymbolic, test_peephole3);
 	tcase_add_test(tsymbolic, test_peephole4);
+	tcase_add_test(tsymbolic, test_peephole5);
 	suite_add_tcase(s, tsymbolic);
 
 	return s;

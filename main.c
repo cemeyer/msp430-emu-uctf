@@ -195,6 +195,7 @@ emulate1(void)
 	// dec r15; jnz -2 busy loop
 	if ((instr == 0x831f || instr == 0x533f) &&
 	    memword(registers[PC]+2) == 0x23fe) {
+		ASSERT(!isregsym(15), "TODO");
 		insns += (2ul * registers[15]) + 1;
 		registers[15] = 0;
 
@@ -586,7 +587,7 @@ handle_single(uint16_t instr)
 				t->s_nargs = 2;
 				t->s_arg[0] = s;
 				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
-				register_symbols[SR] = t;
+				register_symbols[SR] = peephole(t);
 			} else {
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
@@ -914,7 +915,7 @@ handle_double(uint16_t instr)
 				t->s_nargs = 2;
 				t->s_arg[0] = s;
 				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
-				register_symbols[SR] = t;
+				register_symbols[SR] = peephole(t);
 			} else {
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
@@ -1459,16 +1460,19 @@ memsym(uint16_t addr, uint16_t bw)
 }
 
 static void
-_printsym(struct sexp *sym)
+_printsym(struct sexp *sym, unsigned indent)
 {
 
+	for (unsigned i = 0; i < indent; i++)
+		printf("  ");
+
 	if (sym->s_kind == S_IMMEDIATE) {
-		printf("0x%04x", sym->s_nargs);
+		printf("0x%04x\n", sym->s_nargs);
 		return;
 	}
 
 	if (sym->s_kind == S_INP) {
-		printf("Input[%d]", sym->s_nargs);
+		printf("Input[%d]\n", sym->s_nargs);
 		return;
 	}
 
@@ -1515,11 +1519,15 @@ _printsym(struct sexp *sym)
 		break;
 	}
 
+	printf("\n");
 	for (unsigned i = 0; i < sym->s_nargs; i++) {
-		printf(" ");
-		_printsym(sym->s_arg[i]);
+		//printf(" ");
+		_printsym(sym->s_arg[i], indent + 1);
 	}
-	printf(")");
+
+	for (unsigned i = 0; i < indent; i++)
+		printf("  ");
+	printf(")\n");
 }
 
 void
@@ -1529,7 +1537,7 @@ printsym(struct sexp *sym)
 	if (sym == NULL)
 		return;
 
-	_printsym(sym);
+	_printsym(sym, 0);
 	printf("\n");
 }
 
@@ -1868,6 +1876,54 @@ peep_orjoin(struct sexp *s, bool *changed)
 		return mksexp(S_AND, 2, u, sexp_imm_alloc(mask));
 }
 
+//  s  t  u         v  w       x
+// (& (| (<< S-Exp1 N) S-Exp2) M) -> (& S-Exp2 M) iff ((1<<N) & M) == 0
+static struct sexp *
+peep_andorreduce(struct sexp *s, bool *changed)
+{
+	struct sexp *t, *u, *v, *w, *x;
+	unsigned N, M;
+
+	ASSERT(s->s_nargs == 2, "sexpvisit contract");
+
+	t = s->s_arg[0];
+	x = s->s_arg[1];
+
+	if (t->s_kind != S_OR || t->s_nargs != 2)
+		return s;
+	if (x->s_kind != S_IMMEDIATE)
+		return s;
+
+	M = x->s_nargs;
+
+	u = t->s_arg[0];
+	w = t->s_arg[1];
+
+	// (| S-Exp (<< ...))  ->  (| (<< ...) S-Exp)
+	if (u->s_kind != S_LSHIFT && w->s_kind == S_LSHIFT) {
+		struct sexp *tmp = u;
+		u = w;
+		w = tmp;
+	}
+
+	if (u->s_kind != S_LSHIFT || u->s_nargs != 2)
+		return s;
+
+	v = u->s_arg[1];
+	if (v->s_kind != S_IMMEDIATE)
+		return s;
+
+	N = v->s_nargs;
+
+	if (((1 << N) & M) == 0) {
+		*changed = true;
+		s->s_arg[0] = w;
+		return s;
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -1908,6 +1964,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_XOR, -1, s, peep_xorident, &changed);
 		s = sexpvisit(S_LSHIFT, 2, s, peep_lshiftflatten, &changed);
 		s = sexpvisit(S_OR, 2, s, peep_orjoin, &changed);
+		s = sexpvisit(S_AND, 2, s, peep_andorreduce, &changed);
 	} while (changed);
 
 	return s;
