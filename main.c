@@ -1714,6 +1714,37 @@ peep_flatten(struct sexp *s, bool *changed)
 	return s;
 }
 
+static void
+sexpdelidx(struct sexp *s, unsigned idx)
+{
+
+	s->s_arg[idx] = s->s_arg[s->s_nargs - 1];
+	s->s_nargs--;
+}
+
+static struct sexp *
+peep_xorident(struct sexp *s, bool *changed)
+{
+
+	if (s->s_nargs < 2)
+		return s;
+
+	// (^ a b a c) -> (^ b c)
+	for (unsigned i = 0; i < s->s_nargs - 1; i++) {
+		for (unsigned j = i + 1; j < s->s_nargs; j++) {
+			if (sexp_eq(s->s_arg[i], s->s_arg[j])) {
+				*changed = true;
+				ASSERT(i < j, "by-definition");
+				sexpdelidx(s, j);
+				sexpdelidx(s, i);
+				return s;
+			}
+		}
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -1751,6 +1782,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_expfirst, &changed);
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_constreduce, &changed);
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_flatten, &changed);
+		s = sexpvisit(S_XOR, -1, s, peep_xorident, &changed);
 	} while (changed);
 
 	return s;
@@ -1777,4 +1809,24 @@ sexp_imm_alloc(uint16_t n)
 	r->s_kind = S_IMMEDIATE;
 	r->s_nargs = n;
 	return r;
+}
+
+bool
+sexp_eq(struct sexp *s, struct sexp *t)
+{
+
+	if (s->s_kind != t->s_kind)
+		return false;
+
+	if (s->s_nargs != t->s_nargs)
+		return false;
+
+	if (s->s_kind == S_IMMEDIATE || s->s_kind == S_INP)
+		return true;
+
+	for (unsigned i = 0; i < s->s_nargs; i++)
+		if (!sexp_eq(s->s_arg[i], t->s_arg[i]))
+			return false;
+
+	return true;
 }

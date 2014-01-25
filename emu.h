@@ -118,6 +118,7 @@ void		 delmemsyms(uint16_t addr, uint16_t bw);
 struct sexp	*mksexp(enum sexp_kind sk, unsigned nargs, ...);
 struct sexp	*sexp_alloc(enum sexp_kind skind);
 struct sexp	*sexp_imm_alloc(uint16_t n);
+bool		 sexp_eq(struct sexp *s, struct sexp *t);
 
 void		 abort_nodump(void);
 void		 init(void);

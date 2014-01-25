@@ -1392,6 +1392,21 @@ START_TEST(test_peephole)
 }
 END_TEST
 
+START_TEST(test_peephole2)
+{
+	struct sexp *test =
+	    mksexp(S_XOR, 3, mkinp(0), mkinp(1), mkinp(0));
+	struct sexp *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(res->s_kind == S_INP);
+	ck_assert(res->s_nargs == 1);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1520,6 +1535,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_symbolic);
 	tcase_add_test(tsymbolic, test_symbolicb);
 	tcase_add_test(tsymbolic, test_peephole);
+	tcase_add_test(tsymbolic, test_peephole2);
 	suite_add_tcase(s, tsymbolic);
 
 	return s;
