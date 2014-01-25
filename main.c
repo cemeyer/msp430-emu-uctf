@@ -14,6 +14,10 @@ bool		 ctrlc;
 FILE		*trace;
 static bool	 diverged;
 
+static struct sexp SEXP_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 1},
+		   SEXP_8 = {.s_kind = S_IMMEDIATE, .s_nargs = 8},
+		   SEXP_NEG_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xffff};
+
 static struct sexp *
 bytemask(struct sexp *s)
 {
@@ -442,7 +446,7 @@ handle_single(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				srcsym = peephole(bytemask(srcsym));
-			ressym = mksexp(S_RSHIFT, 2, srcsym, 1);
+			ressym = mksexp(S_RSHIFT, 2, srcsym, &SEXP_1);
 			flagsym = mksexp(S_SR_RRC, 1, peephole(ressym));
 		} else {
 			if (bw)
@@ -474,8 +478,8 @@ handle_single(uint16_t instr)
 		if (srcsym) {
 			struct sexp *lo, *hi;
 
-			hi = mksexp(S_LSHIFT, 2, bytemask(srcsym), 8);
-			lo = mksexp(S_RSHIFT, 2, srcsym, 8);
+			hi = mksexp(S_LSHIFT, 2, bytemask(srcsym), &SEXP_8);
+			lo = mksexp(S_RSHIFT, 2, srcsym, &SEXP_8);
 
 			ressym = mksexp(S_OR, 2, hi, lo);
 		} else
@@ -486,7 +490,7 @@ handle_single(uint16_t instr)
 		if (srcsym) {
 			if (bw)
 				srcsym = peephole(bytemask(srcsym));
-			ressym = mksexp(S_RRA, 2, srcsym, 1);
+			ressym = mksexp(S_RRA, 2, srcsym, &SEXP_1);
 			flagsym = mksexp(S_SR_RRA, 1, ressym);
 		} else {
 			if (bw)
@@ -738,7 +742,7 @@ handle_double(uint16_t instr)
 	case 0x8000:
 		// SUB (flags)
 		if (srcsym) {
-			srcsym = mksexp(S_XOR, 2, srcsym, sexp_imm_alloc(0xffff));
+			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
 			if (bw) {
 				srcsym = peephole(bytemask(srcsym));
 				dstsym = peephole(bytemask(dstsym));
@@ -764,7 +768,7 @@ handle_double(uint16_t instr)
 		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
 		if (srcsym) {
-			srcsym = mksexp(S_XOR, 2, srcsym, sexp_imm_alloc(0xffff));
+			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
 			if (bw) {
 				srcsym = peephole(bytemask(srcsym));
 				dstsym = peephole(bytemask(dstsym));
