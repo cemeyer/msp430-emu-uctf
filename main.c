@@ -552,6 +552,13 @@ handle_single(uint16_t instr)
 		break;
 	}
 
+	// concretify
+	if (ressym && ressym->s_kind == S_IMMEDIATE) {
+		res = ressym->s_nargs & 0xffff;
+		sexp_flags(flagsym, &setflags, &clrflags);
+		ressym = NULL;
+	}
+
 	if (ressym) {
 		if (flagsym)
 			register_symbols[SR] = peephole(flagsym);
@@ -866,6 +873,13 @@ handle_double(uint16_t instr)
 	default:
 		unhandled(instr);
 		break;
+	}
+
+	// concretify
+	if (ressym && ressym->s_kind == S_IMMEDIATE) {
+		res = ressym->s_nargs & 0xffff;
+		sexp_flags(flagsym, &setflags, &clrflags);
+		ressym = NULL;
 	}
 
 	if (ressym) {
@@ -1313,6 +1327,7 @@ callgate(unsigned op)
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
 		memory[((getsaddr + bufsz) & 0xffff) - 1] = 0;
+		printf(" < tracking symbolic input >\n");
 		break;
 	case 0x20:
 		// RNG
@@ -1833,4 +1848,46 @@ sexp_eq(struct sexp *s, struct sexp *t)
 			return false;
 
 	return true;
+}
+
+void
+sexp_flags(struct sexp *flags, uint16_t *set, uint16_t *clr)
+{
+
+	if (flags == NULL)
+		return;
+
+	ASSERT(flags->s_nargs == 1, "x");
+
+	switch (flags->s_kind) {
+	case S_SR:
+	case S_SR_AND:
+	case S_SR_RRC:
+	case S_SR_RRA:
+		break;
+	default:
+		ASSERT(false, "bad flags sexp: %u", flags->s_kind);
+		return;
+	}
+
+	ASSERT(flags->s_arg[0]->s_kind == S_IMMEDIATE, "x");
+	unsigned res = flags->s_arg[0]->s_nargs;
+
+	switch (flags->s_kind) {
+	case S_SR:
+		ASSERT(false, "fixme");
+		break;
+	case S_SR_AND:
+		andflags(res, set, clr);
+		break;
+	case S_SR_RRC:
+		ASSERT(false, "fixme");
+		break;
+	case S_SR_RRA:
+		ASSERT(false, "fixme");
+		break;
+	default:
+		ASSERT(false, "x");
+		break;
+	}
 }

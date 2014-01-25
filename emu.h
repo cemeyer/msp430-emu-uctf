@@ -119,6 +119,7 @@ struct sexp	*mksexp(enum sexp_kind sk, unsigned nargs, ...);
 struct sexp	*sexp_alloc(enum sexp_kind skind);
 struct sexp	*sexp_imm_alloc(uint16_t n);
 bool		 sexp_eq(struct sexp *s, struct sexp *t);
+void		 sexp_flags(struct sexp *flags, uint16_t *set, uint16_t *clr);
 
 void		 abort_nodump(void);
 void		 init(void);
