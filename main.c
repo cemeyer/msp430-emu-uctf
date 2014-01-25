@@ -1924,6 +1924,49 @@ peep_andorreduce(struct sexp *s, bool *changed)
 	return s;
 }
 
+//  s   t       u
+// (>> (| ... ) N) -> kill anything in ... that is less than (1<<N)
+static struct sexp *
+peep_rshiftcancel(struct sexp *s, bool *changed)
+{
+	struct sexp *t, *u;
+	unsigned N;
+
+	t = s->s_arg[0];
+	u = s->s_arg[1];
+
+	if ((t->s_kind != S_OR && t->s_kind != S_AND) ||
+	    u->s_kind != S_IMMEDIATE)
+		return s;
+
+	if (t->s_nargs == 0)
+		return s;
+
+	N = u->s_nargs;
+
+scan:
+	for (unsigned i = 0; i < t->s_nargs; i++) {
+		// (>> inp 8) -> 0
+		if (N >= 8 && t->s_arg[i]->s_kind == S_INP) {
+			*changed = true;
+			sexpdelidx(t, i);
+			goto scan;
+		}
+
+		if (t->s_arg[i]->s_kind == S_IMMEDIATE &&
+		    t->s_arg[i]->s_nargs < (1u << N)) {
+			*changed = true;
+			sexpdelidx(t, i);
+			goto scan;
+		}
+	}
+
+	if (t->s_nargs == 0)
+		return &SEXP_0;
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -1965,6 +2008,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_LSHIFT, 2, s, peep_lshiftflatten, &changed);
 		s = sexpvisit(S_OR, 2, s, peep_orjoin, &changed);
 		s = sexpvisit(S_AND, 2, s, peep_andorreduce, &changed);
+		s = sexpvisit(S_RSHIFT, 2, s, peep_rshiftcancel, &changed);
 	} while (changed);
 
 	return s;
