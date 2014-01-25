@@ -1358,6 +1358,40 @@ START_TEST(test_symbolicb)
 }
 END_TEST
 
+static struct sexp *
+mkinp(unsigned i)
+{
+	struct sexp *r = sexp_alloc(S_INP);
+
+	r->s_nargs = i;
+	return r;
+}
+
+START_TEST(test_peephole)
+{
+	struct sexp *test =
+	    mksexp(S_XOR, 2,
+		mksexp(S_XOR, 2,
+		    mkinp(0),
+		    mkinp(1)),
+		mkinp(2));
+	struct sexp *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(res->s_kind == S_XOR);
+	ck_assert(res->s_nargs == 3);
+	ck_assert(res->s_arg[0]->s_kind == S_INP);
+	ck_assert(res->s_arg[0]->s_nargs == 2);
+	ck_assert(res->s_arg[1]->s_kind == S_INP);
+	ck_assert(res->s_arg[1]->s_nargs == 0);
+	ck_assert(res->s_arg[2]->s_kind == S_INP);
+	ck_assert(res->s_arg[2]->s_nargs == 1);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1485,6 +1519,7 @@ suite_instr(void)
 	tcase_add_checked_fixture(tsymbolic, setup_machine, teardown_machine);
 	tcase_add_test(tsymbolic, test_symbolic);
 	tcase_add_test(tsymbolic, test_symbolicb);
+	tcase_add_test(tsymbolic, test_peephole);
 	suite_add_tcase(s, tsymbolic);
 
 	return s;

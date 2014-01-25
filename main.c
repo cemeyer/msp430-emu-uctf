@@ -1434,12 +1434,9 @@ memsym(uint16_t addr, uint16_t bw)
 	return mksexp(S_OR, 2, b2, b1);
 }
 
-void
-printsym(struct sexp *sym)
+static void
+_printsym(struct sexp *sym)
 {
-
-	if (sym == NULL)
-		return;
 
 	if (sym->s_kind == S_IMMEDIATE) {
 		printf("0x%04x", sym->s_nargs);
@@ -1490,15 +1487,26 @@ printsym(struct sexp *sym)
 		ASSERT(sym->s_nargs == 2, "x");
 		break;
 	default:
-		ASSERT(false, "x");
+		ASSERT(false, "what kind is it? %d", sym->s_kind);
 		break;
 	}
 
 	for (unsigned i = 0; i < sym->s_nargs; i++) {
 		printf(" ");
-		printsym(sym->s_arg[i]);
+		_printsym(sym->s_arg[i]);
 	}
 	printf(")");
+}
+
+void
+printsym(struct sexp *sym)
+{
+
+	if (sym == NULL)
+		return;
+
+	_printsym(sym);
+	printf("\n");
 }
 
 void
@@ -1657,6 +1665,55 @@ peep_expfirst(struct sexp *s, bool *changed)
 	return s;
 }
 
+static void
+sexpflatten(struct sexp *s, unsigned argn)
+{
+	struct sexp *t;
+
+	t = s->s_arg[argn];
+	s->s_arg[argn] = s->s_arg[s->s_nargs - 1];
+
+	for (unsigned i = 0; i < t->s_nargs; i++)
+		s->s_arg[s->s_nargs - 1 + i] = t->s_arg[i];
+
+	s->s_nargs += t->s_nargs - 1;
+}
+
+static struct sexp *
+peep_flatten(struct sexp *s, bool *changed)
+{
+
+	ASSERT(s->s_nargs > 0, "huh?");
+
+	switch (s->s_kind) {
+	case S_PLUS:
+	case S_AND:
+	case S_XOR:
+	case S_OR:
+		break;
+	default:
+		return s;
+	}
+
+	// (+ x) -> x, etc.
+	if (s->s_nargs == 1) {
+		*changed = true;
+		return s->s_arg[0];
+	}
+
+	// (^ (^ ...) ...) -> (^ ... ...)
+	for (unsigned i = 0; i < s->s_nargs; i++) {
+		if (s->s_arg[i]->s_kind == s->s_kind &&
+		    s->s_arg[i]->s_nargs + s->s_nargs - 1 <= SEXP_MAXARGS) {
+			*changed = true;
+			sexpflatten(s, i);
+			return s;
+		}
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -1693,6 +1750,7 @@ peephole(struct sexp *s)
 		changed = false;
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_expfirst, &changed);
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_constreduce, &changed);
+		s = sexpvisit(S_MATCH_ANY, -1, s, peep_flatten, &changed);
 	} while (changed);
 
 	return s;
