@@ -1585,7 +1585,7 @@ peep_constreduce(struct sexp *s, bool *changed)
 		return s;
 
 	// (x imm imm ...) -> (x imm)
-	for (unsigned n = 3; n > 1; n--) {
+	for (unsigned n = 3; n > 0; n--) {
 		if (s->s_nargs > n && s->s_arg[n-1]->s_kind == S_IMMEDIATE &&
 		    s->s_arg[n]->s_kind == S_IMMEDIATE) {
 			switch (s->s_kind) {

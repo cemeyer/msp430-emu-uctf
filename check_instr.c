@@ -1498,6 +1498,23 @@ START_TEST(test_peephole6)
 }
 END_TEST
 
+START_TEST(test_peephole7)
+{
+	struct sexp *test =
+	    mksexp(S_XOR, 2,
+		sexp_imm_alloc(0xffff),
+		sexp_imm_alloc(0)),
+	    *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(res->s_kind == S_IMMEDIATE);
+	ck_assert(res->s_nargs == 0xffff);
+}
+END_TEST
+
 Suite *
 suite_instr(void)
 {
@@ -1631,6 +1648,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole4);
 	tcase_add_test(tsymbolic, test_peephole5);
 	tcase_add_test(tsymbolic, test_peephole6);
+	tcase_add_test(tsymbolic, test_peephole7);
 	suite_add_tcase(s, tsymbolic);
 
 	return s;
