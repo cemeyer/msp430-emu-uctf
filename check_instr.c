@@ -1322,7 +1322,7 @@ START_TEST(test_symbolic)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	register_symbols[5] = mksexp(S_INP, 1, 0);
+	register_symbols[5] = mkinp(0);
 
 	emulate1();
 
@@ -1343,7 +1343,7 @@ START_TEST(test_symbolicb)
 	};
 
 	install_words_le(code, CODE_STEP, sizeof(code));
-	register_symbols[5] = mksexp(S_INP, 1, 0);
+	register_symbols[5] = mkinp(0);
 
 	emulate1();
 
@@ -1357,15 +1357,6 @@ START_TEST(test_symbolicb)
 	//    regsym(SR)->symbolic);
 }
 END_TEST
-
-static struct sexp *
-mkinp(unsigned i)
-{
-	struct sexp *r = sexp_alloc(S_INP);
-
-	r->s_nargs = i;
-	return r;
-}
 
 START_TEST(test_peephole)
 {
@@ -1404,6 +1395,61 @@ START_TEST(test_peephole2)
 
 	ck_assert(res->s_kind == S_INP);
 	ck_assert(res->s_nargs == 1);
+}
+END_TEST
+
+START_TEST(test_peephole3)
+{
+	struct sexp *test =
+	    mksexp(S_LSHIFT, 2,
+		mksexp(S_RSHIFT, 2,
+		    mksexp(S_LSHIFT, 2,
+			mkinp(0),
+			sexp_imm_alloc(8)),
+		    sexp_imm_alloc(12)),
+		sexp_imm_alloc(12));
+	struct sexp *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(res->s_kind == S_AND);
+	ck_assert(res->s_nargs == 2);
+	ck_assert(res->s_arg[0] == test->s_arg[0]->s_arg[0]);
+	ck_assert(res->s_arg[1]->s_kind == S_IMMEDIATE);
+	ck_assert(res->s_arg[1]->s_nargs == 0xf000);
+}
+END_TEST
+
+START_TEST(test_peephole4)
+{
+	struct sexp *test =
+	    mksexp(S_XOR, 3, mkinp(0), mkinp(1), mkinp(2));
+	struct sexp *res;
+	uint16_t code[] = {
+		// push r5
+		0x1205,
+		// pop r5
+		0x4135,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	register_symbols[5] = test;
+	//printsym(test);
+
+	emulate1();
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 4);
+	ck_assert(isregsym(5));
+
+	res = register_symbols[5];
+	//printsym(res);
+
+	ck_assert(res->s_kind == S_XOR);
+	ck_assert(res->s_nargs == 3);
+	ck_assert(res == test);
 }
 END_TEST
 
@@ -1536,6 +1582,8 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_symbolicb);
 	tcase_add_test(tsymbolic, test_peephole);
 	tcase_add_test(tsymbolic, test_peephole2);
+	tcase_add_test(tsymbolic, test_peephole3);
+	tcase_add_test(tsymbolic, test_peephole4);
 	suite_add_tcase(s, tsymbolic);
 
 	return s;

@@ -14,8 +14,10 @@ bool		 ctrlc;
 FILE		*trace;
 static bool	 diverged;
 
-static struct sexp SEXP_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 1},
+static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
+		   SEXP_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 1},
 		   SEXP_8 = {.s_kind = S_IMMEDIATE, .s_nargs = 8},
+		   SEXP_FF00 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xff00},
 		   SEXP_NEG_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xffff};
 
 static struct sexp *
@@ -36,13 +38,16 @@ mksexp(enum sexp_kind sk, unsigned nargs, ...)
 	va_list ap;
 
 	ASSERT(nargs <= SEXP_MAXARGS, "xx");
+	ASSERT(sk != S_INP && sk != S_IMMEDIATE, "xx");
 	t->s_nargs = nargs;
 
 	va_start(ap, nargs);
 	for (unsigned i = 0; i < nargs; i++) {
-		t->s_arg[i] = va_arg(ap, struct sexp *);
-		ASSERT(t->s_arg[i] || sk == S_INP || sk == S_IMMEDIATE,
-		    "non-null");
+		struct sexp *a = va_arg(ap, struct sexp *);
+
+		ASSERT((uintptr_t)a > 0x10000, "non-null, non-number");
+
+		t->s_arg[i] = a;
 	}
 	va_end(ap);
 
@@ -1560,10 +1565,18 @@ static struct sexp *
 peep_constreduce(struct sexp *s, bool *changed)
 {
 
+	// (<< 0 ...) -> 0
+	if (s->s_nargs > 0 && s->s_kind == S_LSHIFT &&
+	    s->s_arg[0]->s_kind == S_IMMEDIATE && s->s_arg[0]->s_nargs == 0) {
+		s = s->s_arg[0];
+		*changed = true;
+		return s;
+	}
+
 	if (s->s_nargs < 2)
 		return s;
 
-	// (x imm imm) -> (x imm)
+	// (x imm imm ...) -> (x imm)
 	for (unsigned n = 3; n > 1; n--) {
 		if (s->s_nargs > n && s->s_arg[n-1]->s_kind == S_IMMEDIATE &&
 		    s->s_arg[n]->s_kind == S_IMMEDIATE) {
@@ -1588,6 +1601,11 @@ peep_constreduce(struct sexp *s, bool *changed)
 				s->s_arg[n-1]->s_nargs ^= s->s_arg[n]->s_nargs;
 				*changed = true;
 				break;
+			case S_RSHIFT:
+				s->s_nargs--;
+				s->s_arg[n-1]->s_nargs >>= s->s_arg[n]->s_nargs;
+				*changed = true;
+				break;
 			default:
 				break;
 			}
@@ -1607,44 +1625,59 @@ peep_constreduce(struct sexp *s, bool *changed)
 
 	switch (s->s_kind) {
 	case S_AND:
-		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0) {
+		if (s->s_arg[1]->s_nargs == 0) {
 			// (& x 0) -> 0
 			s = s->s_arg[1];
 			*changed = true;
-		} else if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0xffff) {
+		} else if (s->s_arg[1]->s_nargs == 0xffff) {
 			// (& x ffff) -> x
+			s = s->s_arg[0];
+			*changed = true;
+		} else if (s->s_arg[0]->s_kind == S_INP &&
+		    (s->s_arg[1]->s_nargs & 0xff) == 0xff) {
+			// (& Inp 0xYYff) -> Inp
 			s = s->s_arg[0];
 			*changed = true;
 		}
 		break;
 	case S_XOR:
-		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0) {
+		if (s->s_arg[1]->s_nargs == 0) {
 			// (^ x 0) -> x
 			s = s->s_arg[0];
 			*changed = true;
 		}
 		break;
 	case S_PLUS:
-		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0) {
+		if (s->s_arg[1]->s_nargs == 0) {
 			// (+ x 0) -> x
 			s = s->s_arg[0];
 			*changed = true;
 		}
 		break;
 	case S_OR:
-		if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0) {
+		if (s->s_arg[1]->s_nargs == 0) {
 			// (| x 0) -> x
 			s = s->s_arg[0];
 			*changed = true;
-		} else if (s->s_arg[1]->s_kind == S_IMMEDIATE &&
-		    s->s_arg[1]->s_nargs == 0xffff) {
+		} else if (s->s_arg[1]->s_nargs == 0xffff) {
 			// (| x ffff) -> ffff
 			s = s->s_arg[1];
+			*changed = true;
+		}
+		break;
+	case S_RSHIFT:
+		if (s->s_arg[1]->s_nargs >= 8 &&
+		    s->s_arg[0]->s_kind == S_INP) {
+			// (>> Inp 8) -> 0
+			s = &SEXP_0;
+			*changed = true;
+		}
+		break;
+	case S_LSHIFT:
+		// (<< 0 y) -> 0
+		if (s->s_arg[0]->s_kind == S_IMMEDIATE &&
+		    s->s_arg[0]->s_nargs == 0) {
+			s = s->s_arg[0];
 			*changed = true;
 		}
 		break;
@@ -1764,6 +1797,77 @@ peep_xorident(struct sexp *s, bool *changed)
 	return s;
 }
 
+//  s   t           u
+// (<< (>> S-Exp N) N)  ->  (& S-Exp (- (<< 1 N) 1))
+static struct sexp *
+peep_lshiftflatten(struct sexp *s, bool *changed)
+{
+	struct sexp *t, *u;
+	unsigned mask;
+
+	ASSERT(s->s_nargs == 2, "sexpvisit contract");
+
+	t = s->s_arg[0];
+	u = s->s_arg[1];
+
+	if (u->s_kind != S_IMMEDIATE)
+		return s;
+
+	if (t->s_kind != S_RSHIFT || t->s_nargs != 2)
+		return s;
+
+	if (t->s_arg[1]->s_kind != S_IMMEDIATE ||
+	    t->s_arg[1]->s_nargs != u->s_nargs)
+		return s;
+
+	*changed = true;
+
+	if (u->s_nargs == 8)
+		return mksexp(S_AND, 2, t->s_arg[0], &SEXP_FF00);
+
+	mask = 0xffff & ~((1 << u->s_nargs) - 1);
+	return mksexp(S_AND, 2, t->s_arg[0], sexp_imm_alloc(mask));
+}
+
+//  s  t u     v        w x     y
+// (| (& S-Exp 0xff00) (& S-Exp 0x00ff)) -> (& S-Exp (y|v))
+static struct sexp *
+peep_orjoin(struct sexp *s, bool *changed)
+{
+	struct sexp *t, *u, *v, *w, *x, *y;
+	unsigned mask;
+
+	ASSERT(s->s_nargs == 2, "sexpvisit contract");
+
+	t = s->s_arg[0];
+	w = s->s_arg[1];
+
+	if (t->s_kind != S_AND || t->s_nargs != 2)
+		return s;
+	if (w->s_kind != S_AND || w->s_nargs != 2)
+		return s;
+
+	u = t->s_arg[0];
+	x = w->s_arg[0];
+	if (!sexp_eq(u, x))
+		return s;
+
+	v = t->s_arg[1];
+	y = w->s_arg[1];
+	if (v->s_kind != S_IMMEDIATE)
+		return s;
+	if (y->s_kind != S_IMMEDIATE)
+		return s;
+
+	*changed = true;
+
+	mask = v->s_nargs | y->s_nargs;
+	if (mask == 0xffff)
+		return u;
+	else
+		return mksexp(S_AND, 2, u, sexp_imm_alloc(mask));
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -1802,6 +1906,8 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_constreduce, &changed);
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_flatten, &changed);
 		s = sexpvisit(S_XOR, -1, s, peep_xorident, &changed);
+		s = sexpvisit(S_LSHIFT, 2, s, peep_lshiftflatten, &changed);
+		s = sexpvisit(S_OR, 2, s, peep_orjoin, &changed);
 	} while (changed);
 
 	return s;
@@ -1890,4 +1996,13 @@ sexp_flags(struct sexp *flags, uint16_t *set, uint16_t *clr)
 		ASSERT(false, "x");
 		break;
 	}
+}
+
+struct sexp *
+mkinp(unsigned i)
+{
+	struct sexp *r = sexp_alloc(S_INP);
+
+	r->s_nargs = i;
+	return r;
 }
