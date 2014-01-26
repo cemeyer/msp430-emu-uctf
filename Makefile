@@ -1,8 +1,9 @@
 FLAGS=-Wall -Wextra -std=gnu99 -Wno-unused-function -Wno-unused-variable
 SAFEFLAGS=-Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4
 #OPTFLAGS=`rpm -E %optflags` -O3
-OPTFLAGS=-O3 -g -pipe -grecord-gcc-switches  -m64 -mtune=native -march=native -flto
-DBGFLAGS=-O0 -g -pipe -grecord-gcc-switches  -m64 -mtune=native -march=native -flto
+NEWGCCFLAGS=-grecord-gcc-switches
+OPTFLAGS=-O3 -g -pipe -m64 -mtune=native -march=native -flto $(NEWGCCFLAGS)
+DBGFLAGS=-O0 -g -pipe -m64 -mtune=native -march=native -flto $(NEWGCCFLAGS)
 GLIB_FLAGS=`pkg-config --libs --cflags glib-2.0`
 
 msp430-emu: main.c emu.h
