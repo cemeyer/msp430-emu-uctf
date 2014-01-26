@@ -9,6 +9,16 @@
 
 #define ck_assert_flags(flags) _ck_assert_flags(__LINE__, flags)
 
+// Unused for check, I just conflated the EMU_CHECK define for other things
+// (bfhw).
+void
+getsn(uint16_t addr, uint16_t sz)
+{
+
+	(void)addr;
+	(void)sz;
+}
+
 void
 install_words_le(uint16_t *code, uint16_t addr, size_t sz)
 {
@@ -1314,6 +1324,7 @@ START_TEST(test_adc_indpc)
 }
 END_TEST
 
+#if SYMBOLIC
 START_TEST(test_symbolic)
 {
 	uint16_t code[] = {
@@ -1514,6 +1525,7 @@ START_TEST(test_peephole7)
 	ck_assert(res->s_nargs == 0xffff);
 }
 END_TEST
+#endif // SYMBOLIC
 
 Suite *
 suite_instr(void)
@@ -1638,6 +1650,7 @@ suite_instr(void)
 	tcase_add_test(trra, test_rrab);
 	suite_add_tcase(s, trra);
 
+#if SYMBOLIC
 	TCase *tsymbolic = tcase_create("symbolic");
 	tcase_add_checked_fixture(tsymbolic, setup_machine, teardown_machine);
 	tcase_add_test(tsymbolic, test_symbolic);
@@ -1650,6 +1663,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole6);
 	tcase_add_test(tsymbolic, test_peephole7);
 	suite_add_tcase(s, tsymbolic);
+#endif
 
 	return s;
 }
