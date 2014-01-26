@@ -461,6 +461,7 @@ main(int argc, char **argv)
 
 	signal(SIGINT, ctrlc_handler);
 
+	registers[PC] = memword(0xfffe);
 	emulate();
 	printf("Got CPUOFF, stopped.\n");
 
@@ -634,7 +635,6 @@ void
 emulate(void)
 {
 
-	registers[PC] = memword(0xfffe);
 #ifndef QUIET
 	printf("Initial register state:\n");
 	print_regs();

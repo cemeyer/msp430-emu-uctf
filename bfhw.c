@@ -5,12 +5,26 @@
 #define PROFILE_BFHW 0
 
 char rom[0x10000];
+
+char fastload[0x10000];
+char fastregisters[16*2];
+
 #define ATTEMPT_LEN 5
 uint8_t attempt[ATTEMPT_LEN];
+
+bool fastrom;
 
 void
 getsn(uint16_t addr, uint16_t bufsz)
 {
+
+	if (!fastrom) {
+		memcpy(fastload, memory, sizeof(fastload));
+		memcpy(fastregisters, registers, sizeof(fastregisters));
+		fastrom = true;
+		off = true;
+		return;
+	}
 
 	(void)bufsz;
 	memcpy(&memory[addr], attempt, ATTEMPT_LEN);
@@ -210,6 +224,15 @@ main(int argc, char **argv)
 	signal(SIGVTALRM, sigvtalrm);
 	start_profile();
 #endif
+
+	// Prime the fast-load rom/registers (Thanks, rmmh)
+	fastrom = false;
+	init();
+	memcpy(memory, rom, sizeof memory);
+	registers[PC] = memword(0xfffe);
+	emulate();
+	ASSERT(fastrom, "fastfastfast");
+
 	start = now();
 	while (true) {
 		size_t rd;
@@ -218,13 +241,16 @@ main(int argc, char **argv)
 
 		insns = 0;
 		init();
-		memcpy(memory, rom, sizeof memory);
+
+		//memcpy(memory, rom, sizeof memory);
+		// Jump directly to getsn(). Do not pass go. Do not collect ...
+		memcpy(memory, fastload, sizeof(memory));
+		memcpy(registers, fastregisters, sizeof(registers));
 
 		// generate new input
 		rd = fread(attempt, 1, ATTEMPT_LEN, urandom);
 		ASSERT(rd == ATTEMPT_LEN, "x");
 
-		registers[PC] = memword(0xfffe);
 #ifndef QUIET
 		printf("Attempting: %02x%02x%02x%02x%02x\n", (uns)attempt[0],
 		    (uns)attempt[1], (uns)attempt[2], (uns)attempt[3],
