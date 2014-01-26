@@ -2,3 +2,6 @@
 *.bin
 msp430-emu
 check_instr
+*.gcda
+bfhw
+bfnovo
