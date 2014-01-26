@@ -4,4 +4,4 @@ compiler:
     - gcc
 before_install:
     - sudo apt-get -y install check
-script: make NEWGCCFLAGS= check
+script: make NEWGCCFLAGS= EXTRAFLAGS=-lrt check
