@@ -19,6 +19,7 @@ static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
 		   SEXP_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 1},
 		   SEXP_8 = {.s_kind = S_IMMEDIATE, .s_nargs = 8},
 		   SEXP_FF00 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xff00},
+		   SEXP_00FF = {.s_kind = S_IMMEDIATE, .s_nargs = 0x00ff},
 		   SEXP_NEG_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xffff};
 
 // 18:16 < rmmh> int k = 0x123456; int rand() { k=30903*(k&65535)+(k>>16);
@@ -884,7 +885,8 @@ handle_single(uint16_t instr)
 	case 0x180:
 		// SXT (sets flags)
 		if (srcsym) {
-			ressym = mksexp(S_SXT, 1, srcsym);
+			ressym = mksexp(S_SXT, 1, peephole(mksexp(S_AND, 2,
+				    srcsym, &SEXP_00FF)));
 			flagsym = mksexp(S_SR_AND, 1, ressym);
 		} else {
 			if (srcnum & 0x80)
@@ -1901,8 +1903,8 @@ _printsym(struct sexp *sym, unsigned indent)
 		break;
 	}
 
-	printf(":%d\n", sym->s_nargs);
-	//printf("\n");
+	//printf(":%d\n", sym->s_nargs);
+	printf("\n");
 	for (unsigned i = 0; i < sym->s_nargs; i++) {
 		//printf(" ");
 		_printsym(sym->s_arg[i], indent + 1);
@@ -2220,6 +2222,38 @@ peep_lshiftflatten(struct sexp *s, bool *changed)
 	return mksexp(S_AND, 2, t->s_arg[0], sexp_imm_alloc(mask));
 }
 
+//  s   t           u
+// (>> (<< S-Exp N) N)  ->  (& S-Exp (- (<< 1 (- 16 N)) 1))
+static struct sexp *
+peep_rshiftflatten(struct sexp *s, bool *changed)
+{
+	struct sexp *t, *u;
+	unsigned mask;
+
+	ASSERT(s->s_nargs == 2, "sexpvisit contract");
+
+	t = s->s_arg[0];
+	u = s->s_arg[1];
+
+	if (u->s_kind != S_IMMEDIATE)
+		return s;
+
+	if (t->s_kind != S_LSHIFT || t->s_nargs != 2)
+		return s;
+
+	if (t->s_arg[1]->s_kind != S_IMMEDIATE ||
+	    t->s_arg[1]->s_nargs != u->s_nargs)
+		return s;
+
+	*changed = true;
+
+	if (u->s_nargs == 8)
+		return mksexp(S_AND, 2, t->s_arg[0], &SEXP_00FF);
+
+	mask = (1 << (16 - u->s_nargs)) - 1;
+	return mksexp(S_AND, 2, t->s_arg[0], sexp_imm_alloc(mask));
+}
+
 //  s  t u     v        w x     y
 // (| (& S-Exp 0xff00) (& S-Exp 0x00ff)) -> (& S-Exp (y|v))
 static struct sexp *
@@ -2492,6 +2526,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_MATCH_ANY, -1, s, peep_flatten, &changed);
 		s = sexpvisit(S_XOR, -1, s, peep_xorident, &changed);
 		s = sexpvisit(S_LSHIFT, 2, s, peep_lshiftflatten, &changed);
+		s = sexpvisit(S_RSHIFT, 2, s, peep_rshiftflatten, &changed);
 		s = sexpvisit(S_OR, 2, s, peep_orjoin, &changed);
 		s = sexpvisit(S_AND, 2, s, peep_andorreduce, &changed);
 		s = sexpvisit(S_RSHIFT, 2, s, peep_rshiftcancel, &changed);
