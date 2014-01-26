@@ -791,6 +791,14 @@ handle_jump(uint16_t instr)
 		shouldjump = ((N ^ V) == 0);
 		}
 		break;
+	case 0x6:
+		// JL
+		{
+		bool N = !!(registers[SR] & SR_N),
+		     V = !!(registers[SR] & SR_V);
+		shouldjump = (N ^ V);
+		}
+		break;
 	case 0x7:
 		// JMP
 		shouldjump = true;
