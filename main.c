@@ -336,8 +336,8 @@ print_ips(void)
 	if (end == start)
 		end++;
 
-	printf("Approx. %ju instructions per second.\n",
-	    (uintmax_t)insns * 1000000 / (end - start));
+	printf("Approx. %ju instructions per second (Total: %ju).\n",
+	    (uintmax_t)insns * 1000000 / (end - start), (uintmax_t)insns);
 }
 
 void
@@ -502,20 +502,23 @@ emulate1(void)
 	}
 
 	// dec r15; jnz -2 busy loop
-#if 0
 	if ((instr == 0x831f || instr == 0x533f) &&
 	    memword(registers[PC]+2) == 0x23fe) {
 		ASSERT(!isregsym(15), "TODO");
-		insns += (2ul * registers[15]) + 1;
+		//insns += (2ul * registers[15]) + 1;
 		registers[15] = 0;
 
 		ASSERT(!isregsym(SR), "TODO");
 		registers[SR] &= ~(SR_C | SR_N | SR_V);
 		registers[SR] |= SR_Z;
 		registers[PC] += 4;
+
+		fprintf(ctrace, "\tregisters[15] = 0;\n");
+		fprintf(ctrace, "\tregisters[%d] &= 0x%x;\n", SR,
+		    ~(0xfe00|SR_C|SR_N|SR_V));
+		fprintf(ctrace, "\tregisters[%d] |= 0x%x;\n", SR, SR_Z);
 		goto out;
 	}
-#endif
 
 #if 0
 	if (instr == 0x4ebd && (isregsym(13) || isregsym(14))) {
@@ -556,11 +559,11 @@ emulate1(void)
 
 		// depth=12 -> only uses first 6 bytes
 		// depth=11 -> only uses first 4?
-		if (sexpdepth(regsym(i), 14)) {
+		if (sexpdepth(regsym(i), 6)) {
 			printf("r%d is *too* symbolic:\n", i);
-			//printsym(regsym(i));
-			//printf("/r%d\n", i);
-			//print_regs();
+			printsym(regsym(i));
+			printf("/r%d\n", i);
+			print_regs();
 			off = true;
 		}
 	}
@@ -574,11 +577,14 @@ emulate1(void)
 	}
 #endif
 
+#if 0
+	// TODO: only emit if tainted/ing?
 	if (bits(instr, 15, 13) != 0x2000)
 		ctrans();
 	if (registers[PC] == 0x0010)
 		fputs("Xcallgate();\n"
 		    "if (unlocked) return;\n", ctrace);
+#endif
 
 out:
 	insns++;
@@ -1398,6 +1404,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			if (isregsym(instr_decode_src)) {
 				printf("symbolic load reg(%u)\n", instr_decode_src);
 				printsym(regsym(instr_decode_src));
+				printf("\n");
 			}
 
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
@@ -2523,6 +2530,9 @@ sexp_imm_alloc(uint16_t n)
 bool
 sexp_eq(struct sexp *s, struct sexp *t)
 {
+
+	if (s == t)
+		return true;
 
 	if (s->s_kind != t->s_kind)
 		return false;
