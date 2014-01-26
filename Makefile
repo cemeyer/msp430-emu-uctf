@@ -1,6 +1,6 @@
 FLAGS=-Wall -Wextra -std=gnu99 -Wno-unused-function -Wno-unused-variable
 #OPTFLAGS=`rpm -E %optflags` -O3
-OPTFLAGS=-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4 -grecord-gcc-switches  -m64 -mtune=generic
+OPTFLAGS=-O3 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4 -grecord-gcc-switches  -m64 -mtune=generic
 DBGFLAGS=-O0 -g -pipe -Wall -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4 -grecord-gcc-switches  -m64 -mtune=generic
 GLIB_FLAGS=`pkg-config --libs --cflags glib-2.0`
 

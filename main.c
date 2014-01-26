@@ -3,16 +3,20 @@
 uint16_t	 pc_start;
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
+#if SYMBOLIC
 struct sexp	*register_symbols[16];
 GHashTable	*memory_symbols;		// addr -> sexp*
+#endif
 uint64_t	 start;
 uint64_t	 insns;
 bool		 off;
 bool		 unlocked;
 bool		 ctrlc;
 
+#ifndef EMU_CHECK
 FILE		*trace;
 FILE		*ctrace;
+#endif
 static bool	 diverged;
 
 static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
@@ -25,6 +29,7 @@ static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
 // 18:16 < rmmh> int k = 0x123456; int rand() { k=30903*(k&65535)+(k>>16);
 //               return(k&65535); }
 
+#ifndef EMU_CHECK
 static void
 ctrans(void)
 {
@@ -294,7 +299,9 @@ ctrans(void)
 afterwrite:
 	ASSERT(localpc == registers[PC] || (single && opcode == 5) || pcchange, "mismatch");
 }
+#endif // EMU_CHECK
 
+#if SYMBOLIC
 static struct sexp *
 bytemask(struct sexp *s)
 {
@@ -328,6 +335,7 @@ mksexp(enum sexp_kind sk, unsigned nargs, ...)
 
 	return t;
 }
+#endif
 
 void
 print_ips(void)
@@ -347,6 +355,7 @@ init(void)
 
 	//trace = fopen("msp430_trace.txt", "wb");
 	//ASSERT(trace, "fopen");
+#ifndef EMU_CHECK
 	ctrace = fopen("xxx.c", "wb");
 	ASSERT(ctrace, "fopen");
 
@@ -372,29 +381,35 @@ init(void)
 	    "\tuint16_t src, dst;\n"
 	    "\tunsigned res;\n"
 	    "\tinit();\n\n", ctrace);
+#endif
 
 	insns = 0;
 	off = unlocked = false;
 	start = now();
-	memset(memory, 0, sizeof(memory));
+	//memset(memory, 0, sizeof(memory));
+#if SYMBOLIC
 	memory_symbols = g_hash_table_new(NULL, NULL);
 	ASSERT(memory_symbols, "g_hash");
 
 	memset(registers, 0, sizeof registers);
 	for (unsigned reg = 0; reg < 16; reg++)
 		register_symbols[reg] = NULL;
+#endif
 }
 
 void
 destroy(void)
 {
 
+#ifndef EMU_CHECK
 	fflush(ctrace);
 	fclose(ctrace);
 	//fflush(trace);
 	//fclose(trace);
 	trace = NULL;
 	ctrace = NULL;
+#endif
+#if SYMBOLIC
 	ASSERT(memory_symbols, "mem_symbol_hash");
 	g_hash_table_destroy(memory_symbols);
 	memory_symbols = NULL;
@@ -404,6 +419,7 @@ destroy(void)
 			free(regsym(reg));
 		register_symbols[reg] = NULL;
 	}
+#endif
 }
 
 #ifndef EMU_CHECK
@@ -498,30 +514,39 @@ emulate1(void)
 
 	if (instr == 0x4800) {
 		printf("br r8?\n");
+#if SYMBOLIC
 		printsym(regsym(8));
+#endif
 		exit(0);
 	}
 
 	// dec r15; jnz -2 busy loop
 	if ((instr == 0x831f || instr == 0x533f) &&
 	    memword(registers[PC]+2) == 0x23fe) {
+#if SYMBOLIC
 		ASSERT(!isregsym(15), "TODO");
+#endif
 		//insns += (2ul * registers[15]) + 1;
 		registers[15] = 0;
 
+#if SYMBOLIC
 		ASSERT(!isregsym(SR), "TODO");
+#endif
 		registers[SR] &= ~(SR_C | SR_N | SR_V);
 		registers[SR] |= SR_Z;
 		registers[PC] += 4;
 
+#ifndef EMU_CHECK
 		fprintf(ctrace, "\tregisters[15] = 0;\n");
 		fprintf(ctrace, "\tregisters[%d] &= 0x%x;\n", SR,
 		    ~(0xfe00|SR_C|SR_N|SR_V));
 		fprintf(ctrace, "\tregisters[%d] |= 0x%x;\n", SR, SR_Z);
+#endif
 		goto out;
 	}
 
 #if 0
+#if SYMBOLIC
 	if (instr == 0x4ebd && (isregsym(13) || isregsym(14))) {
 		printf("mov @r14+, 0x0(r13)\n");
 		printf("r13 sym? %d\n", isregsym(13));
@@ -533,6 +558,7 @@ emulate1(void)
 		print_regs();
 		print_ips();
 	}
+#endif
 #endif
 
 	switch (bits(instr, 15, 13)) {
@@ -547,6 +573,7 @@ emulate1(void)
 		break;
 	}
 
+#if SYMBOLIC
 	for (unsigned i = 0; i < 16; i++) {
 		if (!isregsym(i))
 			continue;
@@ -560,7 +587,7 @@ emulate1(void)
 
 		// depth=12 -> only uses first 6 bytes
 		// depth=11 -> only uses first 4?
-		if (sexpdepth(regsym(i), 6)) {
+		if (sexpdepth(regsym(i), 7)) {
 			printf("r%d is *too* symbolic:\n", i);
 			printsym(regsym(i));
 			printf("/r%d\n", i);
@@ -568,6 +595,7 @@ emulate1(void)
 			off = true;
 		}
 	}
+#endif
 
 #if 0
 	if (bits(instr, 15, 13) != 0x2000 && insns < 59984) {
@@ -619,17 +647,21 @@ emulate(void)
 			abort_nodump();
 		}
 
+#if SYMBOLIC
 		if (isregsym(PC)) {
 			printf("symbolic PC\n");
 			abort_nodump();
 		}
+#endif
 
 		if (registers[PC] == 0x0010) {
+#if SYMBOLIC
 			if (isregsym(SR)) {
 				printf("Symbolic interrupt!!!\nSR =>");
 				printsym(regsym(SR));
 				abort_nodump();
 			}
+#endif
 
 			// Callgate
 			if (registers[SR] & 0x8000) {
@@ -667,7 +699,9 @@ emulate(void)
 
 		emulate1();
 
+#if SYMBOLIC
 		ASSERT(!isregsym(CG), "CG symbolic");
+#endif
 		ASSERT(registers[CG] == 0, "CG");
 		if (registers[SR] & SR_CPUOFF) {
 			off = true;
@@ -684,7 +718,9 @@ inc_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
+#if SYMBOLIC
 	ASSERT(!isregsym(reg), "symbolic reg(%u): can't inc", (uns)reg);
+#endif
 	registers[reg] = (registers[reg] + inc) & 0xffff;
 }
 
@@ -696,7 +732,9 @@ dec_reg(uint16_t reg, uint16_t bw)
 	if (reg != PC && reg != SP && bw)
 		inc = 1;
 
+#if SYMBOLIC
 	ASSERT(!isregsym(reg), "symbolic reg(%u): can't dec", (uns)reg);
+#endif
 	registers[reg] = (registers[reg] - inc) & 0xffff;
 }
 
@@ -716,11 +754,13 @@ handle_jump(uint16_t instr)
 
 	inc_reg(PC, 0);
 
+#if SYMBOLIC
 	if (cnd != 0x7 && isregsym(SR)) {
 		printf("XXX symbolic branch\nSR: ");
 		printsym(regsym(SR));
 		abort_nodump();
 	}
+#endif
 
 	switch (cnd) {
 	case 0x0:
@@ -776,7 +816,9 @@ handle_single(uint16_t instr)
 	unsigned res = (uns)-1;
 	uint16_t setflags = 0,
 		 clrflags = 0;
+#if SYMBOLIC
 	struct sexp *srcsym = NULL, *ressym = NULL, *flagsym = NULL;
+#endif
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
@@ -787,20 +829,26 @@ handle_single(uint16_t instr)
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
+#if SYMBOLIC
 		if (isregsym(srcval))
 			srcsym = regsym(srcval);
 		else
+#endif
 			srcnum = registers[srcval];
 		break;
 	case OP_MEM:
+#if SYMBOLIC
 		if (ismemsym(srcval, bw))
 			srcsym = memsym(srcval, bw);
 		else {
+#endif
 			if (bw)
 				srcnum = membyte(srcval);
 			else
 				srcnum = memword(srcval);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case OP_CONST:
 		srcnum = srcval;
@@ -819,17 +867,21 @@ handle_single(uint16_t instr)
 	switch (bits(instr, 9, 7)) {
 	case 0x000:
 		// RRC
+#if SYMBOLIC
 		if (srcsym) {
 			if (bw)
 				srcsym = peephole(bytemask(srcsym));
 			ressym = mksexp(S_RSHIFT, 2, srcsym, &SEXP_1);
 			flagsym = mksexp(S_SR_RRC, 1, peephole(ressym));
 		} else {
+#endif
 			if (bw)
 				srcnum &= 0xff;
 			res = srcnum >> 1;
 
+#if SYMBOLIC
 			ASSERT(!isregsym(SR), "TODO");
+#endif
 			if (registers[SR] & SR_C) {
 				if (bw)
 					res |= 0x80;
@@ -847,10 +899,13 @@ handle_single(uint16_t instr)
 			if (res)
 				clrflags |= SR_Z;
 			// doesn't set Z
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x080:
 		// SWPB (no flags)
+#if SYMBOLIC
 		if (srcsym) {
 			struct sexp *lo, *hi;
 
@@ -859,16 +914,19 @@ handle_single(uint16_t instr)
 
 			ressym = mksexp(S_OR, 2, hi, lo);
 		} else
+#endif
 			res = ((srcnum & 0xff) << 8) | (srcnum >> 8);
 		break;
 	case 0x100:
 		// RRA (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			if (bw)
 				srcsym = peephole(bytemask(srcsym));
 			ressym = mksexp(S_RRA, 2, srcsym, &SEXP_1);
 			flagsym = mksexp(S_SR_RRA, 1, ressym);
 		} else {
+#endif
 			if (bw)
 				srcnum &= 0xff;
 			res = srcnum >> 1;
@@ -880,22 +938,28 @@ handle_single(uint16_t instr)
 			clrflags |= SR_Z;
 			if (0x8000 & res)
 				setflags |= SR_N;
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x180:
 		// SXT (sets flags)
+#if SYMBOLIC
 		if (srcsym) {
 			ressym = mksexp(S_SXT, 1, peephole(mksexp(S_AND, 2,
 				    srcsym, &SEXP_00FF)));
 			flagsym = mksexp(S_SR_AND, 1, ressym);
 		} else {
+#endif
 			if (srcnum & 0x80)
 				res = srcnum | 0xff00;
 			else
 				res = srcnum & 0x00ff;
 
 			andflags(res, &setflags, &clrflags);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x200:
 		// PUSH (no flags)
@@ -903,17 +967,21 @@ handle_single(uint16_t instr)
 		dstval = registers[SP];
 		dstkind = OP_MEM;
 
+#if SYMBOLIC
 		if (srcsym)
 			ressym = srcsym;
 		else
+#endif
 			res = srcnum;
 		break;
 	case 0x280:
 		// CALL (no flags)
+#if SYMBOLIC
 		if (srcsym) {
 			printf("XXX symbolic CALL\n");
 			abort_nodump();
 		} else {
+#endif
 			// Call [src]
 			res = srcnum;
 			dstval = PC;
@@ -922,13 +990,16 @@ handle_single(uint16_t instr)
 			// Push PC+1
 			dec_reg(SP, 0);
 			memwriteword(registers[SP], registers[PC]);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	default:
 		unhandled(instr);
 		break;
 	}
 
+#if SYMBOLIC
 	// concretify
 	if (ressym && ressym->s_kind == S_IMMEDIATE) {
 		res = ressym->s_nargs & 0xffff;
@@ -947,8 +1018,10 @@ handle_single(uint16_t instr)
 		else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
 	} else {
+#endif
 		if (setflags || clrflags) {
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+#if SYMBOLIC
 			if (isregsym(SR)) {
 				struct sexp *s = sexp_alloc(S_OR), *t;
 				s->s_nargs = 2;
@@ -960,10 +1033,13 @@ handle_single(uint16_t instr)
 				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
 				register_symbols[SR] = peephole(t);
 			} else {
+#endif
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
 				registers[SR] &= 0x1ff;
+#if SYMBOLIC
 			}
+#endif
 		}
 
 		if (dstkind == OP_REG) {
@@ -972,13 +1048,17 @@ handle_single(uint16_t instr)
 			if (bw)
 				res &= 0x00ff;
 
+#if SYMBOLIC
 			if (isregsym(dstval))
 				register_symbols[dstval] = NULL;
+#endif
 
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
+#if SYMBOLIC
 			if (ismemsym(dstval, bw))
 				delmemsyms(dstval, bw);
+#endif
 
 			if (bw)
 				memory[dstval] = (res & 0xff);
@@ -986,7 +1066,9 @@ handle_single(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
+#if SYMBOLIC
 	}
+#endif
 }
 
 void
@@ -1004,8 +1086,10 @@ handle_double(uint16_t instr)
 		 dstnum = 0, srcnum = 0 /*as a number*/;
 	uint16_t setflags = 0,
 		 clrflags = 0;
+#if SYMBOLIC
 	struct sexp *srcsym = NULL, *ressym = NULL, *dstsym = NULL,
 		      *flagsym = NULL;
+#endif
 
 	inc_reg(PC, 0);
 
@@ -1017,20 +1101,26 @@ handle_double(uint16_t instr)
 	// Load addressed src values
 	switch (srckind) {
 	case OP_REG:
+#if SYMBOLIC
 		if (isregsym(srcval))
 			srcsym = regsym(srcval);
 		else
+#endif
 			srcnum = registers[srcval];
 		break;
 	case OP_MEM:
+#if SYMBOLIC
 		if (ismemsym(srcval, bw))
 			srcsym = memsym(srcval, bw);
 		else {
+#endif
 			if (bw)
 				srcnum = membyte(srcval);
 			else
 				srcnum = memword(srcval);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case OP_CONST:
 		srcnum = srcval;
@@ -1043,20 +1133,26 @@ handle_double(uint16_t instr)
 	// Load addressed dst values
 	switch (dstkind) {
 	case OP_REG:
+#if SYMBOLIC
 		if (isregsym(dstval))
 			dstsym = regsym(dstval);
 		else
+#endif
 			dstnum = registers[dstval];
 		break;
 	case OP_MEM:
+#if SYMBOLIC
 		if (ismemsym(dstval, bw))
 			dstsym = memsym(dstval, bw);
 		else {
+#endif
 			if (bw)
 				dstnum = membyte(dstval);
 			else
 				dstnum = memword(dstval);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case OP_CONST:
 		ASSERT(instr == 0x4303, "nop");
@@ -1066,6 +1162,7 @@ handle_double(uint16_t instr)
 		break;
 	}
 
+#if SYMBOLIC
 	// If either input is symbolic, both are. Put the other value in a
 	// temporary symbol.
 	if (srcsym && dstsym == NULL) {
@@ -1073,17 +1170,21 @@ handle_double(uint16_t instr)
 	} else if (dstsym && srcsym == NULL) {
 		srcsym = sexp_imm_alloc(srcnum);
 	}
+#endif
 
 	switch (bits(instr, 15, 12)) {
 	case 0x4000:
 		// MOV (no flags)
+#if SYMBOLIC
 		if (srcsym)
 			ressym = srcsym;
 		else
+#endif
 			res = srcnum;
 		break;
 	case 0x5000:
 		// ADD (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			if (bw) {
 				srcsym = peephole(bytemask(srcsym));
@@ -1092,6 +1193,7 @@ handle_double(uint16_t instr)
 			ressym = peephole(mksexp(S_PLUS, 2, srcsym, dstsym));
 			flagsym = mksexp(S_SR, 1, ressym);
 		} else {
+#endif
 			if (bw) {
 				dstnum &= 0xff;
 				srcnum &= 0xff;
@@ -1102,29 +1204,38 @@ handle_double(uint16_t instr)
 				res &= 0x00ff;
 			else
 				res &= 0xffff;
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x6000:
 		// ADDC (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			printf("XXX symbolic ADDC ->SR\n");
 			abort_nodump();
 		} else {
+#endif
 			if (bw) {
 				dstnum &= 0xff;
 				srcnum &= 0xff;
 			}
+#if SYMBOLIC
 			ASSERT(!isregsym(SR), "TODO");
+#endif
 			res = dstnum + srcnum + ((registers[SR] & SR_C) ? 1 : 0);
 			addflags(res, bw, &setflags, &clrflags);
 			if (bw)
 				res &= 0x00ff;
 			else
 				res &= 0xffff;
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x8000:
 		// SUB (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
 			if (bw) {
@@ -1135,6 +1246,7 @@ handle_double(uint16_t instr)
 			    sexp_imm_alloc(1));
 			flagsym = mksexp(S_SR, 1, peephole(ressym));
 		} else {
+#endif
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
 				dstnum &= 0xff;
@@ -1146,11 +1258,14 @@ handle_double(uint16_t instr)
 				res &= 0x00ff;
 			else
 				res &= 0xffff;
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0x9000:
 		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
+#if SYMBOLIC
 		if (srcsym) {
 			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
 			if (bw) {
@@ -1161,6 +1276,7 @@ handle_double(uint16_t instr)
 			    sexp_imm_alloc(1));
 			flagsym = mksexp(S_SR, 1, peephole(ressym));
 		} else {
+#endif
 			srcnum = ~srcnum & 0xffff;
 			if (bw) {
 				dstnum &= 0xff;
@@ -1172,14 +1288,19 @@ handle_double(uint16_t instr)
 				res &= 0x00ff;
 			else
 				res &= 0xffff;
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0xa000:
 		// DADD (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			printf("XXX symbolic DADD ->SR\n");
 			abort_nodump();
-		} else {
+		} else
+#endif
+		{
 			unsigned carry = 0;
 			bool setn = false;
 
@@ -1209,14 +1330,17 @@ handle_double(uint16_t instr)
 		break;
 	case 0xd000:
 		// BIS (no flags)
+#if SYMBOLIC
 		if (srcsym) {
 			printf("XXX symbolic BIS\n");
 			abort_nodump();
 		} else
+#endif
 			res = dstnum | srcnum;
 		break;
 	case 0xe000:
 		// XOR (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			if (bw) {
 				srcsym = peephole(bytemask(srcsym));
@@ -1225,14 +1349,18 @@ handle_double(uint16_t instr)
 			ressym = mksexp(S_XOR, 2, srcsym, dstsym);
 			flagsym = mksexp(S_SR_AND, 1, peephole(ressym));
 		} else {
+#endif
 			res = dstnum ^ srcnum;
 			if (bw)
 				res &= 0x00ff;
 			andflags(res, &setflags, &clrflags);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	case 0xf000:
 		// AND (flags)
+#if SYMBOLIC
 		if (srcsym) {
 			if (bw) {
 				srcsym = peephole(bytemask(srcsym));
@@ -1241,17 +1369,21 @@ handle_double(uint16_t instr)
 			ressym = mksexp(S_AND, 2, srcsym, dstsym);
 			flagsym = mksexp(S_SR_AND, 1, peephole(ressym));
 		} else {
+#endif
 			res = dstnum & srcnum;
 			if (bw)
 				res &= 0x00ff;
 			andflags(res, &setflags, &clrflags);
+#if SYMBOLIC
 		}
+#endif
 		break;
 	default:
 		unhandled(instr);
 		break;
 	}
 
+#if SYMBOLIC
 	// concretify
 	if (ressym && ressym->s_kind == S_IMMEDIATE) {
 		res = ressym->s_nargs & 0xffff;
@@ -1275,8 +1407,10 @@ handle_double(uint16_t instr)
 			ressym = NULL;
 		}
 	} else {
+#endif
 		if (setflags || clrflags) {
 			ASSERT((setflags & clrflags) == 0, "set/clr flags shouldn't overlap");
+#if SYMBOLIC
 			if (isregsym(SR)) {
 				struct sexp *s = sexp_alloc(S_OR), *t;
 				s->s_nargs = 2;
@@ -1288,10 +1422,13 @@ handle_double(uint16_t instr)
 				t->s_arg[1] = sexp_imm_alloc(~clrflags & 0x1ff);
 				register_symbols[SR] = peephole(t);
 			} else {
+#endif
 				registers[SR] |= setflags;
 				registers[SR] &= ~clrflags;
 				registers[SR] &= 0x1ff;
+#if SYMBOLIC
 			}
+#endif
 		}
 
 		if (dstkind == OP_REG) {
@@ -1300,13 +1437,17 @@ handle_double(uint16_t instr)
 			if (bw)
 				res &= 0x00ff;
 
+#if SYMBOLIC
 			if (isregsym(dstval))
 				register_symbols[dstval] = NULL;
+#endif
 
 			registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
+#if SYMBOLIC
 			if (ismemsym(dstval, bw))
 				delmemsyms(dstval, bw);
+#endif
 
 			if (bw)
 				memory[dstval] = (res & 0xff);
@@ -1314,7 +1455,9 @@ handle_double(uint16_t instr)
 				memwriteword(dstval, res);
 		} else
 			ASSERT(dstkind == OP_FLAGSONLY, "x");
+#if SYMBOLIC
 	}
+#endif
 }
 
 // R0 only supports AS_IDX, AS_INDINC (inc 2), AD_IDX.
@@ -1335,7 +1478,9 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			*srcval = instr_decode_src;
 			break;
 		case AS_R2_ABS:
+#if SYMBOLIC
 			ASSERT(!ismemsym(registers[PC], 0), "symbolic ext. word");
+#endif
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
 
@@ -1385,24 +1530,31 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 			*srcval = instr_decode_src;
 			break;
 		case AS_IDX:
+#if SYMBOLIC
 			ASSERT(!ismemsym(registers[PC], 0), "symbolic ext. word");
+#endif
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
 			*srckind = OP_MEM;
+#if SYMBOLIC
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
 			    " (r%d)", instr_decode_src);
+#endif
 			*srcval = (registers[instr_decode_src] + extensionword)
 			    & 0xffff;
 			break;
 		case AS_REGIND:
 			*srckind = OP_MEM;
+#if SYMBOLIC
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
 			    " (r%d)", instr_decode_src);
+#endif
 			*srcval = registers[instr_decode_src];
 			break;
 		case AS_INDINC:
 			*srckind = OP_MEM;
 
+#if SYMBOLIC
 			if (isregsym(instr_decode_src)) {
 				printf("symbolic load reg(%u)\n", instr_decode_src);
 				printsym(regsym(instr_decode_src));
@@ -1411,6 +1563,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
 			    " (r%d)", instr_decode_src);
+#endif
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
 			break;
@@ -1447,13 +1600,17 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 
 		ASSERT(Ad == AD_IDX, "Ad");
 
+#if SYMBOLIC
 		ASSERT(!ismemsym(registers[PC], 0), "symbolic ext. word");
+#endif
 		extensionword = memword(registers[PC]);
 		inc_reg(PC, 0);
 
 		if (instr_decode_dst != SR) {
+#if SYMBOLIC
 			ASSERT(!isregsym(instr_decode_dst), "symbolic load addr"
 			    " (r%d)", instr_decode_dst);
+#endif
 			regval = registers[instr_decode_dst];
 		}
 
@@ -1492,7 +1649,9 @@ uint16_t
 membyte(uint16_t addr)
 {
 
+#if SYMBOLIC
 	ASSERT(!ismemsym(addr, 1), "wrong api for symbolic load");
+#endif
 	return memory[addr];
 }
 
@@ -1502,7 +1661,9 @@ memword(uint16_t addr)
 
 	ASSERT((addr & 0x1) == 0, "word load unaligned: %#04x",
 	    (unsigned)addr);
+#if SYMBOLIC
 	ASSERT(!ismemsym(addr, 0), "wrong api for symbolic load");
+#endif
 	return memory[addr] | ((uint16_t)memory[addr+1] << 8);
 }
 
@@ -1535,13 +1696,17 @@ printmemword(const char *pre, uint16_t addr)
 {
 
 	printf("%s", pre);
+#if SYMBOLIC
 	if (ismemsym(addr+1, 1))
 		printf("??");
 	else
+#endif
 		printf("%02x", membyte(addr+1));
+#if SYMBOLIC
 	if (ismemsym(addr, 1))
 		printf("??");
 	else
+#endif
 		printf("%02x", membyte(addr));
 }
 
@@ -1549,12 +1714,14 @@ static void
 printreg(unsigned reg)
 {
 
-	if (!isregsym(reg)) {
-		printf("%04x  ", registers[reg]);
+#if SYMBOLIC
+	if (isregsym(reg)) {
+		printf("????  ");
 		return;
 	}
+#endif
 
-	printf("????  ");
+	printf("%04x  ", registers[reg]);
 }
 
 void
@@ -1590,6 +1757,7 @@ print_regs(void)
 		printmemword("  ", (registers[SP] & 0xfffe) + 2*i);
 	printf("\n");
 
+#if SYMBOLIC
 	for (unsigned i = 0; i < 16; i++) {
 		if (!isregsym(i))
 			continue;
@@ -1599,13 +1767,16 @@ print_regs(void)
 		printf("/r%d\n", i);
 	}
 	printf("\n");
+#endif
 }
 
 uint16_t
 sr_flags(void)
 {
 
+#if SYMBOLIC
 	ASSERT(!isregsym(SR), "TODO");
+#endif
 	return registers[SR] & (SR_V | SR_CPUOFF | SR_N | SR_Z | SR_C);
 }
 
@@ -1704,7 +1875,8 @@ callgate(unsigned op)
 #endif
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
-		//getsn(getsaddr, bufsz);
+		getsn(getsaddr, bufsz);
+#if 0
 		for (unsigned i = 0; i < (unsigned)bufsz - 1; i++) {
 			struct sexp *s;
 
@@ -1712,8 +1884,11 @@ callgate(unsigned op)
 			s->s_nargs = i;
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
+#endif
 		memory[((getsaddr + bufsz) & 0xffff) - 1] = 0;
+#if 0
 		printf(" < tracking symbolic input >\n");
+#endif
 		break;
 	case 0x20:
 		// RNG
@@ -1748,6 +1923,7 @@ win(void)
 	unlocked = true;
 }
 
+#ifndef EMU_CHECK
 void
 getsn(uint16_t addr, uint16_t bufsz)
 {
@@ -1784,7 +1960,9 @@ getsn(uint16_t addr, uint16_t bufsz)
 out:
 	free(buf);
 }
+#endif
 
+#if SYMBOLIC
 bool
 isregsym(uint16_t reg)
 {
@@ -2436,6 +2614,54 @@ peep_xor(struct sexp *s, bool *changed)
 	return s;
 }
 
+// Special case:
+//     o1 s1 i1      i2     o2 s2 i3      i4
+// (^ (| (<< Inp1 8) Inp2) (| (<< Inp3 8) Inp4)) =>
+// (| (<< (^ Inp1 Inp3) 8) (^ Inp2 Inp4))
+static struct sexp *
+peep_xorinputs(struct sexp *s, bool *changed)
+{
+	struct sexp *o1, *o2, *s1, *s2, *i1, *i2, *i3, *i4;
+
+	o1 = s->s_arg[0];
+	o2 = s->s_arg[1];
+
+	if (o1->s_kind != S_OR || o2->s_kind != S_OR)
+		return s;
+	if (o1->s_nargs != 2 || o2->s_nargs != 2)
+		return s;
+
+	s1 = o1->s_arg[0];
+	s2 = o2->s_arg[0];
+
+	if (s1->s_kind != S_LSHIFT || s2->s_kind != S_LSHIFT)
+		return s;
+	if (s1->s_nargs != 2 || s2->s_nargs != 2)
+		return s;
+	if (s1->s_arg[1]->s_kind != S_IMMEDIATE ||
+	    s2->s_arg[1]->s_kind != S_IMMEDIATE)
+		return s;
+	if (s1->s_arg[1]->s_nargs != 8 ||
+	    s2->s_arg[1]->s_nargs != 8)
+		return s;
+
+	i1 = s1->s_arg[0];
+	i2 = o1->s_arg[1];
+	i3 = s2->s_arg[0];
+	i4 = o2->s_arg[1];
+
+	if (i1->s_kind != S_INP || i2->s_kind != S_INP ||
+	    i3->s_kind != S_INP || i4->s_kind != S_INP)
+		return s;
+
+	*changed = true;
+	return mksexp(S_OR, 2,
+	    mksexp(S_LSHIFT, 2,
+		mksexp(S_XOR, 2, i1, i3),
+		&SEXP_8),
+	    mksexp(S_XOR, 2, i2, i4));
+}
+
 // move imm ANDs inwards past ORs
 static struct sexp *
 peep_and(struct sexp *s, bool *changed)
@@ -2534,6 +2760,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_AND, 2, s, peep_and, &changed);
 		s = sexpvisit(S_XOR, 2, s, peep_xor, &changed);
 		s = sexpvisit(S_SR, 1, s, peep_sr, &changed);
+		s = sexpvisit(S_XOR, 2, s, peep_xorinputs, &changed);
 	} while (changed);
 
 	return s;
@@ -2635,3 +2862,4 @@ mkinp(unsigned i)
 	r->s_nargs = i;
 	return r;
 }
+#endif
