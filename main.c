@@ -9,6 +9,7 @@ GHashTable	*memory_symbols;		// addr -> sexp*
 #endif
 uint64_t	 start;
 uint64_t	 insns;
+uint64_t	 insnlimit;
 bool		 off;
 bool		 unlocked;
 bool		 ctrlc;
@@ -445,6 +446,9 @@ main(int argc, char **argv)
 	romfile = fopen(argv[1], "rb");
 	ASSERT(romfile, "fopen");
 
+	if (argc > 2)
+		insnlimit = (uintmax_t)atoll(argv[2]);
+
 	init();
 
 	idx = 0;
@@ -464,6 +468,7 @@ main(int argc, char **argv)
 	registers[PC] = memword(0xfffe);
 	emulate();
 	printf("Got CPUOFF, stopped.\n");
+	print_regs();
 
 	print_ips();
 
@@ -705,6 +710,11 @@ emulate(void)
 		ASSERT(registers[CG] == 0, "CG");
 		if (registers[SR] & SR_CPUOFF) {
 			off = true;
+			break;
+		}
+
+		if (insnlimit && insns >= insnlimit) {
+			printf("\nXXX Hit insn limit, halting XXX\n");
 			break;
 		}
 	}
