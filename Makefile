@@ -11,7 +11,7 @@ msp430-emu: main.c emu.h
 	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) $< -o $@
 
 check: check_instr.c main.c emu.h
-	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) $(EXTRAFLAGS) $< -lcheck -DEMU_CHECK main.c -o check_instr
+	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) $< -DEMU_CHECK main.c -o check_instr -lcheck $(EXTRAFLAGS)
 	./check_instr
 
 bfhw: bfhw.c main.c emu.h
