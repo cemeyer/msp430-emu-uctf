@@ -107,6 +107,17 @@ typedef unsigned int uns;
 	abort_nodump(); \
 } while (false)
 
+#ifdef REALLYFAST
+
+#define _MASK(N) ((1U << (N)) - 1)
+#define bits(N, H, L) \
+    ((N) & _MASK(H+1) & ~_MASK(L))
+
+#define memwriteword(addr, word) (memword(addr) = (word))
+#define memword(addr) (*(uint16_t*)&memory[(addr) & 0xffff])
+
+#endif
+
 struct sexp	*peephole(struct sexp *s);
 bool		 isregsym(uint16_t reg);
 bool		 ismemsym(uint16_t addr, uint16_t bw);
@@ -130,11 +141,15 @@ void		 destroy(void);
 void		 emulate(void);
 void		 emulate1(void);
 uint16_t	 membyte(uint16_t addr);
+#ifndef REALLYFAST
 uint16_t	 memword(uint16_t addr);
 void		 memwriteword(uint16_t addr, uint16_t word);
+#endif
 void		 mem2reg(uint16_t addr, unsigned reg);
 void		 reg2mem(unsigned reg, uint16_t addr);
+#ifndef REALLYFAST
 uint16_t	 bits(uint16_t v, unsigned max, unsigned min);
+#endif
 #define unhandled(instr) _unhandled(__FILE__, __LINE__, instr)
 void		 _unhandled(const char *f, unsigned l, uint16_t instr);
 #define illins(instr) _illins(__FILE__, __LINE__, instr)
@@ -143,8 +158,10 @@ void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 dec_reg(uint16_t reg, uint16_t bw);
 void		 print_regs(void);
 uint16_t	 sr_flags(void);
+#ifndef REALLYFAST
 void		 addflags(unsigned res, uint16_t orig, uint16_t *set,
 			  uint16_t *clr);
+#endif
 void		 andflags(uint16_t res, uint16_t *set, uint16_t *clr);
 uint64_t	 now(void);	// microseconds
 void		 getsn(uint16_t addr, uint16_t len);
@@ -161,5 +178,39 @@ void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
 		 enum operand_kind *dstkind);
 
 void	print_ips(void);
+
+#ifdef REALLYFAST
+inline void
+addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
+{
+	unsigned sz = 16;
+
+	if (bw)
+		sz = 8;
+
+	if (bw == 0 && (res & 0x8000))
+		*set |= SR_N;
+	else
+		*clr |= SR_N;
+
+	// #uctf never sets V. Only clear on arithmetic, though.
+	*clr |= SR_V;
+	*clr |= 0xfe00;
+#if 0
+	if ((res & 0x8000) ^ (orig & 0x8000))
+		*set |= SR_V;
+#endif
+
+	if ((res & ((1 << sz) - 1)) == 0)
+		*set |= SR_Z;
+	else
+		*clr |= SR_Z;
+
+	if (res & (1 << sz))
+		*set |= SR_C;
+	else
+		*clr |= SR_C;
+}
+#endif
 
 #endif

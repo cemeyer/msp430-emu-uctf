@@ -6,7 +6,7 @@
 
 char rom[0x10000];
 #define ATTEMPT_LEN 5
-char attempt[ATTEMPT_LEN];
+uint8_t attempt[ATTEMPT_LEN];
 
 void
 getsn(uint16_t addr, uint16_t bufsz)
@@ -15,6 +15,8 @@ getsn(uint16_t addr, uint16_t bufsz)
 	(void)bufsz;
 	memcpy(&memory[addr], attempt, ATTEMPT_LEN);
 }
+
+unsigned attemptlimit;
 
 FILE *urandom;
 
@@ -175,6 +177,9 @@ main(int argc, char **argv)
 	uint64_t start;
 	uintmax_t attempts = 0;
 
+	if (getenv("BFHW_GENERATE"))
+		attemptlimit = 45;
+
 	(void)argc;
 	(void)argv;
 
@@ -211,6 +216,7 @@ main(int argc, char **argv)
 
 		attempts++;
 
+		insns = 0;
 		init();
 		memcpy(memory, rom, sizeof memory);
 
@@ -219,6 +225,11 @@ main(int argc, char **argv)
 		ASSERT(rd == ATTEMPT_LEN, "x");
 
 		registers[PC] = memword(0xfffe);
+#ifndef QUIET
+		printf("Attempting: %02x%02x%02x%02x%02x\n", (uns)attempt[0],
+		    (uns)attempt[1], (uns)attempt[2], (uns)attempt[3],
+		    (uns)attempt[4]);
+#endif
 
 #if PROFILE_BFHW
 		while (true) {
@@ -239,13 +250,17 @@ main(int argc, char **argv)
 		}
 #else /* not profile */
 		emulate();
-#endif
+#ifndef QUIET
+		printf("Emulate: done (off: %d pc: 0x%04x insns: %jd)\n", off,
+		    registers[PC], (uintmax_t)insns);
+#endif // quiet
+#endif // profile_bfhw
 
 		if (unlocked) {
 			printf("Success\n");
-			printf("Solve: %02x%02x%02x%02x%02x\n",
-			    attempt[0], attempt[1], attempt[2], attempt[3],
-			    attempt[4]);
+			printf("Solution: %02x%02x%02x%02x%02x\n",
+			    (uns)attempt[0], (uns)attempt[1], (uns)attempt[2],
+			    (uns)attempt[3], (uns)attempt[4]);
 			break;
 		}
 
@@ -260,6 +275,9 @@ main(int argc, char **argv)
 			attempts = 0;
 			start = now();
 		}
+
+		if (attemptlimit && attempts >= attemptlimit)
+			break;
 	}
 
 #if PROFILE_BFHW

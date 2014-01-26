@@ -387,11 +387,11 @@ init(void)
 	off = unlocked = false;
 	start = now();
 	//memset(memory, 0, sizeof(memory));
+	memset(registers, 0, sizeof registers);
 #if SYMBOLIC
 	memory_symbols = g_hash_table_new(NULL, NULL);
 	ASSERT(memory_symbols, "g_hash");
 
-	memset(registers, 0, sizeof registers);
 	for (unsigned reg = 0; reg < 16; reg++)
 		register_symbols[reg] = NULL;
 #endif
@@ -1655,6 +1655,7 @@ membyte(uint16_t addr)
 	return memory[addr];
 }
 
+#ifndef REALLYFAST
 uint16_t
 memword(uint16_t addr)
 {
@@ -1666,7 +1667,9 @@ memword(uint16_t addr)
 #endif
 	return memory[addr] | ((uint16_t)memory[addr+1] << 8);
 }
+#endif
 
+#ifndef REALLYFAST
 uint16_t
 bits(uint16_t v, unsigned max, unsigned min)
 {
@@ -1681,6 +1684,7 @@ bits(uint16_t v, unsigned max, unsigned min)
 
 	return v & mask;
 }
+#endif
 
 void
 abort_nodump(void)
@@ -1780,6 +1784,7 @@ sr_flags(void)
 	return registers[SR] & (SR_V | SR_CPUOFF | SR_N | SR_Z | SR_C);
 }
 
+#ifndef REALLYFAST
 void
 memwriteword(uint16_t addr, uint16_t word)
 {
@@ -1789,7 +1794,9 @@ memwriteword(uint16_t addr, uint16_t word)
 	memory[addr] = word & 0xff;
 	memory[addr+1] = (word >> 8) & 0xff;
 }
+#endif
 
+#ifndef REALLYFAST
 void
 addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 {
@@ -1821,6 +1828,7 @@ addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)
 	else
 		*clr |= SR_C;
 }
+#endif
 
 // set flags based on result; used in AND, SXT, ...
 void
