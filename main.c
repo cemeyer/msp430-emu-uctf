@@ -1336,6 +1336,16 @@ handle_double(uint16_t instr)
 				clrflags |= SR_C;
 		}
 		break;
+	case 0xc000:
+		// BIC
+#if SYMBOLIC
+		if (srcsym) {
+			printf("XXX symbolic BIC\n");
+			abort_nodump();
+		} else
+#endif
+			res = dstnum & ~srcnum;
+		break;
 	case 0xd000:
 		// BIS (no flags)
 #if SYMBOLIC
