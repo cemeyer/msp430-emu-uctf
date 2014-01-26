@@ -30,6 +30,24 @@ getsn(uint16_t addr, uint16_t bufsz)
 	memcpy(&memory[addr], attempt, ATTEMPT_LEN);
 }
 
+void
+_illins(const char *f, unsigned l, uint16_t instr)
+{
+
+	printf("Input '%02x%02x%02x%02x%02x' causes @pc corruption??\n",
+	    (uns)attempt[0], (uns)attempt[1], (uns)attempt[2],
+	    (uns)attempt[3], (uns)attempt[4]);
+
+	printf("%s:%u: ILLEGAL Instruction: %#04x @PC=%#04x\n",
+	    f, l, (unsigned)instr, (unsigned)pc_start);
+	printf("Raw at PC: ");
+	for (unsigned i = 0; i < 6; i++)
+		printf("%02x", memory[pc_start+i]);
+	printf("\n");
+
+	off = true;
+}
+
 unsigned attemptlimit;
 
 FILE *urandom;

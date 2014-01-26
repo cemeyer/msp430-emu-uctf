@@ -1650,6 +1650,7 @@ _unhandled(const char *f, unsigned l, uint16_t instr)
 	abort_nodump();
 }
 
+#ifndef EMU_CHECK
 void
 _illins(const char *f, unsigned l, uint16_t instr)
 {
@@ -1662,6 +1663,7 @@ _illins(const char *f, unsigned l, uint16_t instr)
 	printf("\n");
 	abort_nodump();
 }
+#endif
 
 uint16_t
 membyte(uint16_t addr)
