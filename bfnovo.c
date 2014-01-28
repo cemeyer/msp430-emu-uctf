@@ -10,7 +10,7 @@ char fastload[0x10000];
 char fastregisters[16*2];
 
 #define ATTEMPT_LEN 5
-uint8_t attempt[ATTEMPT_LEN];
+uint8_t attempt[ATTEMPT_LEN + 1];
 
 bool fastrom;
 
@@ -28,6 +28,7 @@ getsn(uint16_t addr, uint16_t bufsz)
 
 	(void)bufsz;
 	memcpy(&memory[addr], attempt, ATTEMPT_LEN);
+	memset(&memory[addr + ATTEMPT_LEN], 0, 2);
 }
 
 unsigned attemptlimit;
@@ -192,7 +193,7 @@ main(int argc, char **argv)
 	uintmax_t attempts = 0;
 
 	if (getenv("BF_GENERATE"))
-		attemptlimit = 45;
+		attemptlimit = 35000;
 
 	(void)argc;
 	(void)argv;
@@ -248,8 +249,12 @@ main(int argc, char **argv)
 		memcpy(registers, fastregisters, sizeof(registers));
 
 		// generate new input
-		rd = fread(attempt, 1, ATTEMPT_LEN, urandom);
-		ASSERT(rd == ATTEMPT_LEN, "x");
+		rd = fread(attempt, 1, ATTEMPT_LEN + 1, urandom);
+		ASSERT(rd == (ATTEMPT_LEN + 1), "x");
+
+		// Force at least one of the characters to be %; use the 6th
+		// random byte to choose which one.
+		attempt[ (attempt[ATTEMPT_LEN] % ATTEMPT_LEN) ] = '%';
 
 #ifndef QUIET
 		printf("Attempting: %02x%02x%02x%02x%02x\n", (uns)attempt[0],

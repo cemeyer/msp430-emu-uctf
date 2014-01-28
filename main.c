@@ -499,7 +499,15 @@ emulate1(void)
 	uint16_t instr;
 
 	pc_start = registers[PC];
+#if BF
+	if (registers[PC] & 0x1) {
+		printf("insn addr unaligned");
+		off = true;
+		return;
+	}
+#else
 	ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
+#endif
 
 	instr = memword(registers[PC]);
 #if 0
