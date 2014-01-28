@@ -499,7 +499,7 @@ emulate1(void)
 	uint16_t instr;
 
 	pc_start = registers[PC];
-#if BF
+#ifdef BF
 	if (registers[PC] & 0x1) {
 		printf("insn addr unaligned");
 		off = true;
@@ -1598,7 +1598,12 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 	uint16_t extensionword;
 
 	if (instr_decode_dst == CG) {
+#ifdef BF
+		if (instr != 0x4303)
+			illins(instr);
+#else
 		ASSERT(instr == 0x4303, "nop");
+#endif
 		*dstkind = OP_CONST;
 		*dstval = 0;
 		return;
