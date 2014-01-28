@@ -150,9 +150,17 @@ void		 reg2mem(unsigned reg, uint16_t addr);
 #ifndef REALLYFAST
 uint16_t	 bits(uint16_t v, unsigned max, unsigned min);
 #endif
+#ifdef BF
+#define unhandled(instr) do { _unhandled(__FILE__, __LINE__, instr); return; } while (false)
+#else
 #define unhandled(instr) _unhandled(__FILE__, __LINE__, instr)
+#endif
 void		 _unhandled(const char *f, unsigned l, uint16_t instr);
+#ifdef BF
+#define illins(instr) do { _illins(__FILE__, __LINE__, instr); return; } while (false)
+#else
 #define illins(instr) _illins(__FILE__, __LINE__, instr)
+#endif
 void		 _illins(const char *f, unsigned l, uint16_t instr);
 void		 inc_reg(uint16_t reg, uint16_t bw);
 void		 dec_reg(uint16_t reg, uint16_t bw);

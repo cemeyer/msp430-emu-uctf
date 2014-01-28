@@ -518,14 +518,6 @@ emulate1(void)
 	}
 #endif
 
-	if (instr == 0x4800) {
-		printf("br r8?\n");
-#if SYMBOLIC
-		printsym(regsym(8));
-#endif
-		exit(0);
-	}
-
 	// dec r15; jnz -2 busy loop
 	if ((instr == 0x831f || instr == 0x533f) &&
 	    memword(registers[PC]+2) == 0x23fe) {
@@ -593,6 +585,7 @@ emulate1(void)
 
 		// depth=12 -> only uses first 6 bytes
 		// depth=11 -> only uses first 4?
+#if 0
 		if (sexpdepth(regsym(i), 7)) {
 			printf("r%d is *too* symbolic:\n", i);
 			printsym(regsym(i));
@@ -600,6 +593,7 @@ emulate1(void)
 			print_regs();
 			off = true;
 		}
+#endif
 	}
 #endif
 
@@ -673,30 +667,6 @@ emulate(void)
 				unsigned op = (registers[SR] >> 8) & 0x7f;
 				callgate(op);
 			}
-#if 0
-		} else if (registers[PC] == 0xe000) {
-			// breakpoint for hollywood
-			printf("0xe000:  ");
-			dumpmem(0xe000, 0x10);
-		} else if (registers[PC] == 0xe4c6) {
-			// breakpoint for hollywood
-			printf("0xe4c6:  ");
-			dumpmem(0xe4c6, 0x10);
-		} else if ((registers[PC] & 0xf000) == 0xe000 &&
-		    ((registers[PC] > 0xe00e && registers[PC] < 0xe4c6) ||
-		     (registers[PC] > 0xe4d4))) {
-			printf("0x%04x:  ", registers[PC]);
-			dumpmem(registers[PC], 0x10);
-			exit(0);
-		} else if (registers[PC] == 0x806e) {
-			// breakpoint for hollywood
-			dumpmem(0xe4c6, 0x10);
-			exit(0);
-		} else if (registers[PC] == 0x4534) {
-			// breakpoint for hollywood
-			dumpmem(0xe000, 0x10);
-			exit(0);
-#endif
 		}
 
 		if (off)
@@ -708,7 +678,7 @@ emulate(void)
 		ASSERT(!isregsym(CG), "CG symbolic");
 #endif
 		ASSERT(registers[CG] == 0, "CG");
-		if (registers[SR] & SR_CPUOFF) {
+		if (off || registers[SR] & SR_CPUOFF) {
 			off = true;
 			break;
 		}
@@ -840,6 +810,9 @@ handle_single(uint16_t instr)
 
 	inc_reg(PC, 0);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
+
+	if (off)
+		return;
 
 	dstkind = srckind;
 	dstval = srcval;
@@ -1115,6 +1088,9 @@ handle_double(uint16_t instr)
 	//    (uns)Ad, (uns)bw, (uns)As, (uns)ddst);
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 	load_dst(instr, ddst, Ad, &dstval, &dstkind);
+
+	if (off)
+		return;
 
 	// Load addressed src values
 	switch (srckind) {
@@ -1657,10 +1633,13 @@ _unhandled(const char *f, unsigned l, uint16_t instr)
 	for (unsigned i = 0; i < 6; i++)
 		printf("%02x", memory[pc_start+i]);
 	printf("\n");
+#ifdef BF
+	off = true;
+#else
 	abort_nodump();
+#endif
 }
 
-#ifndef EMU_CHECK
 void
 _illins(const char *f, unsigned l, uint16_t instr)
 {
@@ -1671,9 +1650,12 @@ _illins(const char *f, unsigned l, uint16_t instr)
 	for (unsigned i = 0; i < 6; i++)
 		printf("%02x", memory[pc_start+i]);
 	printf("\n");
+#ifdef BF
+	off = true;
+#else
 	abort_nodump();
-}
 #endif
+}
 
 uint16_t
 membyte(uint16_t addr)
@@ -1913,18 +1895,20 @@ callgate(unsigned op)
 #endif
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
-		getsn(getsaddr, bufsz);
-#if 0
-		for (unsigned i = 0; i < (unsigned)bufsz - 1; i++) {
+#if SYMBOLIC
+		for (unsigned i = 0; i < 8; i++) {
 			struct sexp *s;
 
 			s = sexp_alloc(S_INP);
 			s->s_nargs = i;
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
+#else
+		getsn(getsaddr, bufsz);
 #endif
-		memory[((getsaddr + bufsz) & 0xffff) - 1] = 0;
-#if 0
+		memory[((getsaddr + 9) & 0xffff) - 1] = 0;
+		memory[((getsaddr + 10) & 0xffff) - 1] = 0;
+#if SYMBOLIC
 		printf(" < tracking symbolic input >\n");
 #endif
 		break;
@@ -2760,6 +2744,10 @@ sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
 
 	ASSERT(s, "non-null");
 	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
+		return s;
+
+	if (s->s_kind == S_SR || s->s_kind == S_SR_AND ||
+	    s->s_kind == S_SR_RRC || s->s_kind == S_SR_RRA)
 		return s;
 
 	for (unsigned i = 0; i < s->s_nargs; i++) {

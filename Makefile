@@ -16,22 +16,24 @@ check: check_instr.c main.c emu.h
 
 bfhw: bfhw.c main.c emu.h
 	@rm -f *.gcda
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-generate $< -lcheck -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
-	BFHW_GENERATE=1 ./bfhw
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-use $< -lcheck -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
+	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-generate $< -DBF=1 -DSYMBOLIC=0 -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o prof-$@
+	BFHW_GENERATE=1 ./prof-$@
+	@rm -f ./prof-$@
+	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-use $< -DBF=1 -DSYMBOLIC=0 -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
 	@rm -f *.gcda
 
 bfhw_profile: bfhw.c main.c emu.h
 	@rm -f *.gcda
-	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -O1 -fprofile-generate $< -lcheck -DEMU_CHECK -DREALLYFAST main.c -o bfhw_prof
+	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -O1 -fprofile-generate $< -DBF=1 -DSYMBOLIC=0 -DEMU_CHECK -DREALLYFAST main.c -o bfhw_prof
 	BFHW_GENERATE=1 ./bfhw_prof
-	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -O1 -fprofile-use $< -lcheck -DEMU_CHECK -DREALLYFAST main.c -o bfhw_prof
+	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -O1 -fprofile-use $< -DBF=1 -DSYMBOLIC=0 -DEMU_CHECK -DREALLYFAST main.c -o bfhw_prof
 	@rm -f *.gcda
 	valgrind --tool=callgrind ./bfhw_prof
 
 bfnovo: bfnovo.c main.c emu.h
 	@rm -f *.gcda
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-generate $< -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
-	BF_GENERATE=1 ./bfnovo
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-use $< -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
+	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-generate $< -DSYMBOLIC=0 -DBF=1 -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o prof-$@
+	BF_GENERATE=1 ./prof-$@
+	@rm -f ./prof-$@
+	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-use $< -DSYMBOLIC=0 -DBF=1 -DEMU_CHECK -DQUIET -DREALLYFAST main.c -o $@
 	@rm -f *.gcda

@@ -19,20 +19,6 @@ getsn(uint16_t addr, uint16_t sz)
 	(void)sz;
 }
 
-// same.
-void
-_illins(const char *f, unsigned l, uint16_t instr)
-{
-
-	printf("%s:%u: ILLEGAL Instruction: %#04x @PC=%#04x\n",
-	    f, l, (unsigned)instr, (unsigned)pc_start);
-	printf("Raw at PC: ");
-	for (unsigned i = 0; i < 6; i++)
-		printf("%02x", memory[pc_start+i]);
-	printf("\n");
-	abort_nodump();
-}
-
 void
 install_words_le(uint16_t *code, uint16_t addr, size_t sz)
 {
