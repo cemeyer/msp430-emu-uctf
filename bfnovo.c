@@ -193,7 +193,7 @@ main(int argc, char **argv)
 	uintmax_t attempts = 0;
 
 	if (getenv("BF_GENERATE"))
-		attemptlimit = 35000;
+		attemptlimit = 100;
 
 	(void)argc;
 	(void)argv;
@@ -249,12 +249,17 @@ main(int argc, char **argv)
 		memcpy(registers, fastregisters, sizeof(registers));
 
 		// generate new input
+new_in:
 		rd = fread(attempt, 1, ATTEMPT_LEN + 1, urandom);
 		ASSERT(rd == (ATTEMPT_LEN + 1), "x");
 
 		// Force at least one of the characters to be %; use the 6th
 		// random byte to choose which one.
-		attempt[ (attempt[ATTEMPT_LEN] % ATTEMPT_LEN) ] = '%';
+		attempt[1] = 0x44 + (attempt[1] % 3);
+		attempt[ 2 + (attempt[ATTEMPT_LEN] % 2) ] = '%';
+		attempt[ 3 + (attempt[ATTEMPT_LEN] % 2) ] = 'n';
+		if (attempt[0] == 0xa8 && attempt[1] == 0x44)
+			goto new_in;
 
 #ifndef QUIET
 		printf("Attempting: %02x%02x%02x%02x%02x\n", (uns)attempt[0],
