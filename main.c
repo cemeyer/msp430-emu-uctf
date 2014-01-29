@@ -1919,9 +1919,9 @@ callgate(unsigned op)
 #else
 		getsn(getsaddr, bufsz);
 #endif
+#if SYMBOLIC
 		memory[((getsaddr + 9) & 0xffff) - 1] = 0;
 		memory[((getsaddr + 10) & 0xffff) - 1] = 0;
-#if SYMBOLIC
 		printf(" < tracking symbolic input >\n");
 #endif
 		break;
@@ -1983,8 +1983,11 @@ getsn(uint16_t addr, uint16_t bufsz)
 		for (unsigned i = 0; i < bufsz - 1u; i++) {
 			unsigned byte;
 
-			if (buf[2*i+1] == 0 || buf[2*i+2] == 0)
+			if (buf[2*i+1] == 0 || buf[2*i+2] == 0) {
+				memory[addr+i] = 0;
+				memory[addr+i+1] = 0;
 				break;
+			}
 
 			sscanf(&buf[2*i+1], "%02x", &byte);
 			//printf("%02x", byte);
