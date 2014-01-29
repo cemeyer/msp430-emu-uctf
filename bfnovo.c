@@ -258,9 +258,12 @@ new_in:
 
 		// Force at least one of the characters to be %; use the 6th
 		// random byte to choose which one.
+		attempt[0] &= 0xfe; // even addresses only
 		attempt[1] = 0x44 + (attempt[1] % 3);
-		attempt[ 2 + (attempt[ATTEMPT_LEN] % 2) ] = '%';
-		attempt[ 3 + (attempt[ATTEMPT_LEN] % 2) ] = 'n';
+		//attempt[ 2 + (attempt[ATTEMPT_LEN] % 2) ] = '%';
+		//attempt[ 3 + (attempt[ATTEMPT_LEN] % 2) ] = 'n';
+		attempt[ 3 ] = '%';
+		attempt[ 4 ] = 'n';
 		if (attempt[0] == 0xa8 && attempt[1] == 0x44)
 			goto new_in;
 
