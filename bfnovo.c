@@ -193,7 +193,7 @@ main(int argc, char **argv)
 	uintmax_t attempts = 0;
 
 	if (getenv("BF_GENERATE"))
-		attemptlimit = 30000;
+		attemptlimit = 300;
 
 	(void)argc;
 	(void)argv;
@@ -235,7 +235,8 @@ main(int argc, char **argv)
 	ASSERT(fastrom, "fastfastfast");
 
 	// hack: don't infinite loop
-	insnlimit = 9487*2;
+	insnlimit = 9487*40;
+	attemptlimit = 256*128 + 2;
 
 	start = now();
 	while (true) {
@@ -252,22 +253,13 @@ main(int argc, char **argv)
 		memcpy(registers, fastregisters, sizeof(registers));
 
 		// generate new input
-new_in:
-		rd = fread(attempt, 1, ATTEMPT_LEN + 1, urandom);
-		ASSERT(rd == (ATTEMPT_LEN + 1), "x");
-
-		// Force at least one of the characters to be %; use the 6th
-		// random byte to choose which one.
-		attempt[0] &= 0xfe; // even addresses only
-		attempt[1] = 0x44 + (attempt[1] % 3);
-		//attempt[ 2 + (attempt[ATTEMPT_LEN] % 2) ] = '%';
-		//attempt[ 3 + (attempt[ATTEMPT_LEN] % 2) ] = 'n';
+		attempt[0] = ((attempts - 1) * 2) % 256;
+		attempt[1] = (((attempts - 1) * 2) / 256);
+		attempt[2] = 0x20;
 		attempt[ 3 ] = '%';
 		attempt[ 4 ] = 'n';
-		if (attempt[0] == 0xa8 && attempt[1] == 0x44)
-			goto new_in;
 
-#ifndef QUIET
+#if 1
 		printf("Attempting: %02x%02x%02x%02x%02x\n", (uns)attempt[0],
 		    (uns)attempt[1], (uns)attempt[2], (uns)attempt[3],
 		    (uns)attempt[4]);

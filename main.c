@@ -862,7 +862,7 @@ handle_single(uint16_t instr)
 	// '0x0000' is an illegal instruction, but #uctf ignores bits 0x1800 in
 	// single-op instructions. We'll do it just for zero, trap on
 	// everything else...
-	if (constbits != 0x4 && instr != 0x0)
+	if (constbits != 0x4 && instr != 0x0 && instr != 0x03)
 		illins(instr);
 
 	switch (bits(instr, 9, 7)) {
@@ -1054,7 +1054,8 @@ handle_single(uint16_t instr)
 				register_symbols[dstval] = NULL;
 #endif
 
-			registers[dstval] = res & 0xffff;
+			if (dstval != CG)
+				registers[dstval] = res & 0xffff;
 		} else if (dstkind == OP_MEM) {
 #if SYMBOLIC
 			if (ismemsym(dstval, bw))
@@ -1065,8 +1066,10 @@ handle_single(uint16_t instr)
 				memory[dstval] = (res & 0xff);
 			else
 				memwriteword(dstval, res);
+		} else if (dstkind == OP_CONST) {
+			ASSERT(instr == 0x3, "instr: %04x", instr);
 		} else
-			ASSERT(dstkind == OP_FLAGSONLY, "x");
+			ASSERT(dstkind == OP_FLAGSONLY, "x: %u", dstkind);
 #if SYMBOLIC
 	}
 #endif
@@ -1159,7 +1162,7 @@ handle_double(uint16_t instr)
 #endif
 		break;
 	case OP_CONST:
-		ASSERT(instr == 0x4303, "nop");
+		ASSERT(instr == 0x4303 || instr == 0x03, "nop");
 		return;
 	default:
 		ASSERT(false, "illins");
@@ -1601,7 +1604,7 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 
 	if (instr_decode_dst == CG) {
 #ifdef BF
-		if (instr != 0x4303)
+		if (instr != 0x4303 && instr != 0x0003)
 			illins(instr);
 #else
 		ASSERT(instr == 0x4303, "nop");
