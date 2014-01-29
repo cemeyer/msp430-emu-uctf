@@ -193,7 +193,7 @@ main(int argc, char **argv)
 	uintmax_t attempts = 0;
 
 	if (getenv("BF_GENERATE"))
-		attemptlimit = 100;
+		attemptlimit = 30000;
 
 	(void)argc;
 	(void)argv;
@@ -233,6 +233,9 @@ main(int argc, char **argv)
 	registers[PC] = memword(0xfffe);
 	emulate();
 	ASSERT(fastrom, "fastfastfast");
+
+	// hack: don't infinite loop
+	insnlimit = 9487*2;
 
 	start = now();
 	while (true) {

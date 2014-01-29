@@ -54,6 +54,7 @@ extern GHashTable	*memory_symbols;		// addr -> struct sexp*
 extern bool		 off;
 extern bool		 unlocked;
 extern uint64_t		 insns;
+extern uint64_t		 insnlimit;
 
 #define PC 0
 #define SP 1

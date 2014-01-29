@@ -501,7 +501,7 @@ emulate1(void)
 	pc_start = registers[PC];
 #ifdef BF
 	if (registers[PC] & 0x1) {
-		printf("insn addr unaligned");
+		//printf("insn addr unaligned");
 		off = true;
 		return;
 	}
@@ -692,7 +692,9 @@ emulate(void)
 		}
 
 		if (insnlimit && insns >= insnlimit) {
+#ifndef BF
 			printf("\nXXX Hit insn limit, halting XXX\n");
+#endif
 			break;
 		}
 	}
@@ -1640,15 +1642,15 @@ void
 _unhandled(const char *f, unsigned l, uint16_t instr)
 {
 
+#ifdef BF
+	off = true;
+#else
 	printf("%s:%u: Instruction: %#04x @PC=%#04x is not implemented\n",
 	    f, l, (unsigned)instr, (unsigned)pc_start);
 	printf("Raw at PC: ");
 	for (unsigned i = 0; i < 6; i++)
 		printf("%02x", memory[pc_start+i]);
 	printf("\n");
-#ifdef BF
-	off = true;
-#else
 	abort_nodump();
 #endif
 }
@@ -1657,15 +1659,15 @@ void
 _illins(const char *f, unsigned l, uint16_t instr)
 {
 
+#ifdef BF
+	off = true;
+#else
 	printf("%s:%u: ILLEGAL Instruction: %#04x @PC=%#04x\n",
 	    f, l, (unsigned)instr, (unsigned)pc_start);
 	printf("Raw at PC: ");
 	for (unsigned i = 0; i < 6; i++)
 		printf("%02x", memory[pc_start+i]);
 	printf("\n");
-#ifdef BF
-	off = true;
-#else
 	abort_nodump();
 #endif
 }
