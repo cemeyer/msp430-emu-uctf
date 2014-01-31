@@ -13,16 +13,15 @@ Anyway, maybe it can help you.
 Building
 ========
 
-`make` will build the emulator, `msp430-emu`. By default, symbolic mode is
-disabled.
+`make` will build the emulator, `msp430-emu`. `make msp430-sym` will build
+the symbolic emulator.
 
 Emulating
 =========
 
-Simply invoke `msp430-emu <romfile>`.
+Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
 
 TODO
 ====
 
 * Fix symbolic to do something reasonable on HW.
-* Add some way of specifying symbolic input length?
