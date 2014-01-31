@@ -35,6 +35,7 @@ enum sexp_kind {
 	S_PLUS,
 	S_IMMEDIATE,	// s_nargs -> value
 	S_SR,
+	S_EQ,
 	S_SR_AND,
 	S_SR_RRC,
 	S_SR_RRA,
@@ -132,6 +133,15 @@ typedef unsigned int uns;
 #endif
 
 #if SYMBOLIC
+#define STATIC_PATTERN(n, s) \
+static struct sexp *n;					\
+static void __attribute__ ((constructor))	\
+_init_pattern_ ## n (void)			\
+{						\
+						\
+	n = (s);				\
+}
+
 struct sexp	*peephole(struct sexp *s);
 bool		 isregsym(uint16_t reg);
 bool		 ismemsym(uint16_t addr, uint16_t bw);

@@ -1760,6 +1760,10 @@ _printsym(struct sexp *sym, unsigned indent)
 	case S_SR:
 		printf("sr");
 		break;
+	case S_EQ:
+		printf("==");
+		ASSERT(sym->s_nargs == 2, "x");
+		break;
 	case S_SR_AND:
 		printf("sr-and");
 		break;
@@ -1902,6 +1906,15 @@ peep_constreduce(struct sexp *s, bool *changed)
 					s = sexp_imm_alloc(imm / 2);
 				*changed = true;
 				}
+				break;
+			case S_EQ:
+				ASSERT(n == 1, "eq");
+				if (s->s_arg[n]->s_nargs ==
+				    s->s_arg[n-1]->s_nargs)
+					s = &SEXP_1;
+				else
+					s = &SEXP_0;
+				*changed = true;
 				break;
 			default:
 				break;
@@ -2439,6 +2452,34 @@ scan:
 	return s;
 }
 
+// reduce cmp to == when we only care about equality
+static uint16_t expeq_matchimm;
+static struct sexp *expeq_matchsexp;
+STATIC_PATTERN(expeq_pattern, mksexp(S_AND, 2,
+	mksexp(S_SR, 1,
+	    mksexp(S_PLUS, 2,
+		subsexp(&expeq_matchsexp),
+		subimm(&expeq_matchimm))),
+	sexp_imm_alloc(SR_Z)));
+
+static struct sexp *
+peep_expeq(struct sexp *s, bool *changed)
+{
+
+	expeq_matchsexp = NULL;
+	expeq_matchimm = 0;
+
+	if (!sexpmatch(expeq_pattern, s))
+		return s;
+
+	*changed = true;
+	return mksexp(S_LSHIFT, 2,
+	    mksexp(S_EQ, 2,
+		expeq_matchsexp,
+		sexp_imm_alloc( ~(expeq_matchimm - 1) )),
+	    &SEXP_1);
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2489,6 +2530,7 @@ peephole(struct sexp *s)
 		s = sexpvisit(S_XOR, 2, s, peep_xor, &changed);
 		s = sexpvisit(S_SR, 1, s, peep_sr, &changed);
 		s = sexpvisit(S_XOR, 2, s, peep_xorinputs, &changed);
+		s = sexpvisit(S_AND, 2, s, peep_expeq, &changed);
 	} while (changed);
 
 	return s;

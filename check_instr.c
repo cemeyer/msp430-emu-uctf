@@ -1580,6 +1580,58 @@ START_TEST(test_symbolic_match)
 	ck_assert(constmatch == 0xfffc);
 }
 END_TEST
+
+START_TEST(test_peephole9)
+{
+	// (& (sr (+ X imm)) SR_Z) ->
+	//
+	// (<< (== X imm2) 1)
+	//
+	// (imm2 := ~(imm1 - 1))
+	struct sexp *test1 =
+			mksexp(S_EQ, 2, sexp_imm_alloc(15),
+			    sexp_imm_alloc(15)),
+		    *test2 =
+			mksexp(S_EQ, 2, sexp_imm_alloc(0),
+			    sexp_imm_alloc(15)),
+		    *test3 =
+			mksexp(S_AND, 2,
+			    mksexp(S_SR, 1,
+				mksexp(S_PLUS, 2,
+				    mkinp(0),
+				    sexp_imm_alloc(0xfffb))),
+			    sexp_imm_alloc(SR_Z)),
+		    *expected3 =
+			mksexp(S_LSHIFT, 2,
+			    mksexp(S_EQ, 2,
+				mkinp(0),
+				sexp_imm_alloc(5)),
+			    sexp_imm_alloc(1)),
+		    *res;
+
+	//printsym(test1);
+	res = peephole(test1);
+	//printsym(res);
+	ck_assert(sexpmatch(sexp_imm_alloc(1), res));
+
+	//printsym(test2);
+	res = peephole(test2);
+	//printsym(res);
+	ck_assert(sexpmatch(sexp_imm_alloc(0), res));
+
+	//printsym(test3);
+	res = peephole(test3);
+	//printsym(res);
+	if (!sexpmatch(expected3, res)) {
+		printf("Expected: ");
+		printsym(expected3);
+		printf("Actual: ");
+		printsym(res);
+
+		ck_abort();
+	}
+}
+END_TEST
 #endif // SYMBOLIC
 
 Suite *
@@ -1719,6 +1771,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole7);
 	tcase_add_test(tsymbolic, test_peephole8);
 	tcase_add_test(tsymbolic, test_symbolic_match);
+	tcase_add_test(tsymbolic, test_peephole9);
 	suite_add_tcase(s, tsymbolic);
 #endif
 
