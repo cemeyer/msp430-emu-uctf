@@ -20,12 +20,14 @@ FILE		*trace;
 #endif
 static bool	 diverged;
 
+#if SYMBOLIC
 static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
 		   SEXP_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 1},
 		   SEXP_8 = {.s_kind = S_IMMEDIATE, .s_nargs = 8},
 		   SEXP_FF00 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xff00},
 		   SEXP_00FF = {.s_kind = S_IMMEDIATE, .s_nargs = 0x00ff},
 		   SEXP_NEG_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xffff};
+#endif
 
 // Fast random numbers:
 // 18:16 < rmmh> int k = 0x123456; int rand() { k=30903*(k&65535)+(k>>16);
@@ -183,6 +185,7 @@ main(int argc, char **argv)
 }
 #endif
 
+#if SYMBOLIC
 static bool
 sexpdepth(struct sexp *s, unsigned max)
 {
@@ -199,6 +202,7 @@ sexpdepth(struct sexp *s, unsigned max)
 
 	return false;
 }
+#endif
 
 void
 emulate1(void)
@@ -2446,6 +2450,8 @@ sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
 	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
 		return s;
 
+	ASSERT(s->s_kind != S_SUBSEXP_MATCH, "bogus");
+
 	for (unsigned i = 0; i < s->s_nargs; i++) {
 		ASSERT(s->s_arg[i], "non-null");
 		s->s_arg[i] = sexpvisit(sk, nargs, s->s_arg[i], cb, changed);
@@ -2583,5 +2589,69 @@ mkinp(unsigned i)
 
 	r->s_nargs = i;
 	return r;
+}
+
+struct sexp *
+subsexp(struct sexp **out)
+{
+	struct sexp *res;
+
+	res = mksexp(S_SUBSEXP_MATCH, 0);
+	res->s_nargs = SUBSEXP_MATCH_EXP;
+	res->s_arg[0] = (void*)out;
+	return res;
+}
+
+struct sexp *
+subimm(uint16_t *out)
+{
+	struct sexp *res;
+
+	res = mksexp(S_SUBSEXP_MATCH, 0);
+	res->s_nargs = SUBSEXP_MATCH_IMM;
+	res->s_arg[0] = (void*)out;
+	return res;
+}
+
+// Similar to sexp_eq, but with wildcard assignment.
+bool
+sexpmatch(struct sexp *needle, struct sexp *haystack)
+{
+
+	if (needle == haystack)
+		return true;
+
+	if (needle->s_kind == S_SUBSEXP_MATCH) {
+		if (needle->s_nargs == SUBSEXP_MATCH_EXP) {
+			*(struct sexp **)needle->s_arg[0] =
+			    haystack;
+			return true;
+		} else if (needle->s_nargs == SUBSEXP_MATCH_IMM) {
+			if (haystack->s_kind != S_IMMEDIATE)
+				return false;
+
+			*(uint16_t *)needle->s_arg[0] = haystack->s_nargs;
+			return true;
+		}
+
+		ASSERT(needle->s_nargs == SUBSEXP_MATCH_EXP ||
+		    needle->s_nargs == SUBSEXP_MATCH_IMM, "bogus");
+		return false;
+	}
+
+	if (needle->s_kind != haystack->s_kind)
+		return false;
+
+	if (needle->s_nargs != haystack->s_nargs)
+		return false;
+
+	if (needle->s_kind == S_IMMEDIATE || needle->s_kind == S_INP)
+		return true;
+
+	for (unsigned i = 0; i < needle->s_nargs; i++)
+		if (!sexpmatch(needle->s_arg[i], haystack->s_arg[i]))
+			return false;
+
+	return true;
 }
 #endif

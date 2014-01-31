@@ -1553,6 +1553,33 @@ START_TEST(test_peephole8)
 	ck_assert(res->s_nargs == 0x1);
 }
 END_TEST
+
+START_TEST(test_symbolic_match)
+{
+	uint16_t constmatch = 10;
+	struct sexp *concrete =
+	    mksexp(S_AND, 2,
+		mksexp(S_SR, 1,
+		    mksexp(S_PLUS, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xfffc))),
+		sexp_imm_alloc(0x2 /* SR_Z */)),
+	    *smatch = NULL,
+	    *match_exp =
+		mksexp(S_AND, 2,
+		    mksexp(S_SR, 1,
+			mksexp(S_PLUS, 2,
+			    subsexp(&smatch),
+			    subimm(&constmatch))),
+		    sexp_imm_alloc(0x2 /* SR_Z */));
+	bool succ;
+
+	succ = sexpmatch(match_exp, concrete);
+	ck_assert(succ);
+	ck_assert(smatch == concrete->s_arg[0]->s_arg[0]->s_arg[0]);
+	ck_assert(constmatch == 0xfffc);
+}
+END_TEST
 #endif // SYMBOLIC
 
 Suite *
@@ -1691,6 +1718,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole6);
 	tcase_add_test(tsymbolic, test_peephole7);
 	tcase_add_test(tsymbolic, test_peephole8);
+	tcase_add_test(tsymbolic, test_symbolic_match);
 	suite_add_tcase(s, tsymbolic);
 #endif
 
