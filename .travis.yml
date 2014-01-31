@@ -3,5 +3,5 @@ compiler:
     - clang
     - gcc
 before_install:
-    - sudo apt-get -y install check libglib2.0-dev libglib2.0
+    - sudo apt-get -y install check
 script: make NEWGCCFLAGS= EXTRAFLAGS=-lrt check

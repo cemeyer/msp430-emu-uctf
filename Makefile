@@ -6,6 +6,7 @@ NEWGCCFLAGS=-grecord-gcc-switches
 OPTFLAGS=-O3 -g -pipe -m64 -mtune=native -march=native -flto $(NEWGCCFLAGS)
 DBGFLAGS=-O0 -g -pipe -m64 -mtune=native -march=native -flto $(NEWGCCFLAGS)
 GLIB_FLAGS=`pkg-config --libs --cflags glib-2.0`
+GLIB_LDFLAGS=`pkg-config --libs glib-2.0`
 
 msp430-emu: main.c emu.h
 	gcc $(OPTFLAGS) $(SAFEFLAGS) $(GLIB_FLAGS) $< -o $@
@@ -14,7 +15,7 @@ msp430-sym: main.c emu.h
 	gcc $(OPTFLAGS) $(SAFEFLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 $< -o $@
 
 check: check_instr.c main.c emu.h
-	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 -DEMU_CHECK $< main.c -o check_instr -lcheck $(EXTRAFLAGS)
+	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 -DEMU_CHECK $< main.c -o check_instr -lcheck $(GLIB_LDFLAGS) $(EXTRAFLAGS)
 	./check_instr
 
 bfhw: bfhw.c main.c emu.h
