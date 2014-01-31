@@ -1,5 +1,5 @@
 FLAGS=-Wall -Wextra -std=gnu99 -Wno-unused-function -Wno-unused-variable
-SAFEFLAGS=-Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4
+SAFEFLAGS=$(FLAGS) -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4
 #OPTFLAGS=`rpm -E %optflags` -O3
 EXTRAFLAGS=
 NEWGCCFLAGS=-grecord-gcc-switches
@@ -8,7 +8,10 @@ DBGFLAGS=-O0 -g -pipe -m64 -mtune=native -march=native -flto $(NEWGCCFLAGS)
 GLIB_FLAGS=`pkg-config --libs --cflags glib-2.0`
 
 msp430-emu: main.c emu.h
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) $< -o $@
+	gcc $(OPTFLAGS) $(SAFEFLAGS) $(GLIB_FLAGS) $< -o $@
+
+msp430-sym: main.c emu.h
+	gcc $(OPTFLAGS) $(SAFEFLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 $< -o $@
 
 check: check_instr.c main.c emu.h
 	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) $< -DEMU_CHECK main.c -o check_instr -lcheck $(EXTRAFLAGS)
