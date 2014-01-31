@@ -1632,6 +1632,74 @@ START_TEST(test_peephole9)
 	}
 }
 END_TEST
+
+START_TEST(test_peephole10)
+{
+	// left-most: >>, <<
+	// second: ^, &, |
+	//
+	// (>> (^ X Y)) imm) ->
+	//
+	// (^ (>> X imm) (>> Y imm))
+	struct sexp *tests[] = {
+		mksexp(S_RSHIFT, 2,
+		    mksexp(S_XOR, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf5)),
+		    sexp_imm_alloc(8)),
+		mksexp(S_RSHIFT, 2,
+		    mksexp(S_AND, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf5)),
+		    sexp_imm_alloc(8)),
+		mksexp(S_RSHIFT, 2,
+		    mksexp(S_OR, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf5)),
+		    sexp_imm_alloc(8)),
+		mksexp(S_LSHIFT, 2,
+		    mksexp(S_XOR, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf500)),
+		    sexp_imm_alloc(8)),
+		mksexp(S_LSHIFT, 2,
+		    mksexp(S_AND, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf500)),
+		    sexp_imm_alloc(8)),
+		mksexp(S_LSHIFT, 2,
+		    mksexp(S_OR, 2,
+			mkinp(0),
+			sexp_imm_alloc(0xf500)),
+		    sexp_imm_alloc(8)),
+	};
+	struct sexp *exp[] = {
+		mkinp(0),
+		sexp_imm_alloc(0),
+		mkinp(0),
+		mkinp(0),
+		sexp_imm_alloc(0),
+		mkinp(0),
+	};
+
+	for (unsigned i = 0; i < ARRAYLEN(tests); i++) {
+		struct sexp *res;
+
+		//printsym(tests[i]);
+		res = peephole(tests[i]);
+		//printsym(res);
+
+		if (!sexp_eq(exp[i], res)) {
+			printf("Expected: ");
+			printsym(exp[i]);
+			printf("Actual: ");
+			printsym(res);
+
+			ck_abort();
+		}
+	}
+}
+END_TEST
 #endif // SYMBOLIC
 
 Suite *
@@ -1772,6 +1840,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole8);
 	tcase_add_test(tsymbolic, test_symbolic_match);
 	tcase_add_test(tsymbolic, test_peephole9);
+	tcase_add_test(tsymbolic, test_peephole10);
 	suite_add_tcase(s, tsymbolic);
 #endif
 
