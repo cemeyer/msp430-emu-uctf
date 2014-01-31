@@ -10,6 +10,7 @@ GHashTable	*memory_symbols;		// addr -> sexp*
 uint64_t	 start;
 uint64_t	 insns;
 uint64_t	 insnlimit;
+uint16_t	 syminplen;
 bool		 off;
 bool		 unlocked;
 bool		 ctrlc;
@@ -138,16 +139,22 @@ main(int argc, char **argv)
 	size_t rd, idx;
 	FILE *romfile;
 
+#if SYMBOLIC
+	if (argc < 3) {
+		printf("usage: msp430-sym [binaryimage] [sym-inp-len]\n");
+#else
 	if (argc < 2) {
 		printf("usage: msp430-emu [binaryimage]\n");
+#endif
 		exit(1);
 	}
 
 	romfile = fopen(argv[1], "rb");
 	ASSERT(romfile, "fopen");
 
-	if (argc > 2)
-		insnlimit = (uintmax_t)atoll(argv[2]);
+#if SYMBOLIC
+	syminplen = atoll(argv[2]);
+#endif
 
 	init();
 
@@ -1554,7 +1561,7 @@ callgate(unsigned op)
 {
 	uint16_t argaddr = registers[SP] + 8,
 		 getsaddr;
-	size_t bufsz;
+	unsigned bufsz;
 
 	switch (op) {
 	case 0x0:
@@ -1570,20 +1577,19 @@ callgate(unsigned op)
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
 #if SYMBOLIC
-		for (unsigned i = 0; i < 8; i++) {
+		ASSERT((uns)getsaddr + (uns)bufsz < 0x10000, "overflow");
+		memset(&memory[getsaddr], 0, bufsz);
+		for (unsigned i = 0; i < min((uns)syminplen, bufsz); i++) {
 			struct sexp *s;
 
 			s = sexp_alloc(S_INP);
 			s->s_nargs = i;
 			g_hash_table_insert(memory_symbols, ptr(getsaddr+i), s);
 		}
+		printf(" < tracking symbolic input (%u bytes) >\n",
+		    (uns)syminplen);
 #else
 		getsn(getsaddr, bufsz);
-#endif
-#if SYMBOLIC
-		memory[((getsaddr + 9) & 0xffff) - 1] = 0;
-		memory[((getsaddr + 10) & 0xffff) - 1] = 0;
-		printf(" < tracking symbolic input >\n");
 #endif
 		break;
 	case 0x20:
