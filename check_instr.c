@@ -1735,6 +1735,46 @@ START_TEST(test_peephole11)
 	ck_assert(res->s_nargs == 0x1);
 }
 END_TEST
+
+START_TEST(test_peephole12)
+{
+	struct sexp *test =
+	    mksexp(S_AND, 2,
+		mksexp(S_LSHIFT, 2,
+		    mkinp(0),
+		    sexp_imm_alloc(8)),
+		sexp_imm_alloc(0xff00)),
+	    *exp =
+		mksexp(S_LSHIFT, 2,
+			mkinp(0),
+			sexp_imm_alloc(8)),
+	    *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(sexp_eq(exp, res));
+}
+END_TEST
+
+START_TEST(test_peephole13)
+{
+	struct sexp *test =
+	    mksexp(S_AND, 2,
+		mksexp(S_RSHIFT, 2,
+		    mkinp(0),
+		    sexp_imm_alloc(8)),
+		sexp_imm_alloc(0x00ff)),
+	    *res;
+
+	//printsym(test);
+	res = peephole(test);
+	//printsym(res);
+
+	ck_assert(sexp_eq(sexp_imm_alloc(0), res));
+}
+END_TEST
 #endif // SYMBOLIC
 
 Suite *
@@ -1877,6 +1917,8 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole9);
 	tcase_add_test(tsymbolic, test_peephole10);
 	tcase_add_test(tsymbolic, test_peephole11);
+	tcase_add_test(tsymbolic, test_peephole12);
+	tcase_add_test(tsymbolic, test_peephole13);
 	suite_add_tcase(s, tsymbolic);
 
 	TCase *tsymbolicd = tcase_create("symbolic-debug");

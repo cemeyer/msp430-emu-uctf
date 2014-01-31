@@ -2708,6 +2708,56 @@ peep_orandreduce(struct sexp *s, bool *changed)
 	return s;
 }
 
+static struct sexp	*andshift_sub;
+static uint16_t		 andshift_im1,
+			 andshift_im2;
+STATIC_PATTERN(andshift_patl,
+    mksexp(S_AND, 2,
+	mksexp(S_LSHIFT, 2,
+	    subsexp(&andshift_sub),
+	    subimm(&andshift_im1)),
+	subimm(&andshift_im2)));
+STATIC_PATTERN(andshift_patr,
+    mksexp(S_AND, 2,
+	mksexp(S_RSHIFT, 2,
+	    subsexp(&andshift_sub),
+	    subimm(&andshift_im1)),
+	subimm(&andshift_im2)));
+
+static struct sexp *
+peep_andshift(struct sexp *s, bool *changed)
+{
+
+	andshift_sub = NULL;
+	andshift_im1 = andshift_im2 = 0;
+
+	if (sexpmatch(andshift_patl, s)) {
+		if (andshift_sub->s_kind != S_INP ||
+		    (andshift_im2 >> andshift_im1) != 0xff)
+			return s;
+
+		*changed = true;
+		return mksexp(S_LSHIFT, 2,
+		    mksexp(S_AND, 2,
+			andshift_sub,
+			sexp_imm_alloc(andshift_im2 >> andshift_im1)),
+		    sexp_imm_alloc(andshift_im1));
+	} else if (sexpmatch(andshift_patr, s)) {
+		if (andshift_sub->s_kind != S_INP ||
+		    (andshift_im2 << andshift_im1) != 0xff00)
+			return s;
+
+		*changed = true;
+		return mksexp(S_RSHIFT, 2,
+		    mksexp(S_AND, 2,
+			andshift_sub,
+			sexp_imm_alloc((andshift_im2 << andshift_im1) & 0xffff)),
+		    sexp_imm_alloc(andshift_im1));
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2797,6 +2847,7 @@ peephole(struct sexp *s)
 		APPLYPEEP(S_LSHIFT, 2, peep_dlshiftflatten);
 		APPLYPEEP(S_RSHIFT, 2, peep_drshiftflatten);
 		APPLYPEEP(S_OR, 2, peep_orandreduce);
+		APPLYPEEP(S_AND, 2, peep_andshift);
 	} while (changed);
 
 	return s;
