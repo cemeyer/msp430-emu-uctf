@@ -1876,6 +1876,23 @@ peep_constreduce(struct sexp *s, bool *changed)
 				s->s_arg[n-1]->s_nargs >>= s->s_arg[n]->s_nargs;
 				*changed = true;
 				break;
+			case S_RRA:
+				{
+				int16_t imm;
+
+				// (>>/ imm 1) -> (/ imm 2)
+				ASSERT(n == 1, "rra");
+				ASSERT(s->s_arg[n]->s_nargs == 1, "/ 2");
+
+				imm = (int16_t)s->s_arg[n-1]->s_nargs;
+
+				if (imm == -1)
+					s = &SEXP_NEG_1;
+				else
+					s = sexp_imm_alloc(imm / 2);
+				*changed = true;
+				}
+				break;
 			default:
 				break;
 			}
@@ -2421,10 +2438,6 @@ sexpvisit(enum sexp_kind sk, int nargs, struct sexp *s, visiter_cb cb,
 
 	ASSERT(s, "non-null");
 	if (s->s_kind == S_INP || s->s_kind == S_IMMEDIATE)
-		return s;
-
-	if (s->s_kind == S_SR || s->s_kind == S_SR_AND ||
-	    s->s_kind == S_SR_RRC || s->s_kind == S_SR_RRA)
 		return s;
 
 	for (unsigned i = 0; i < s->s_nargs; i++) {
