@@ -14,9 +14,8 @@ bool		 off;
 bool		 unlocked;
 bool		 ctrlc;
 
-#ifndef EMU_CHECK
+#ifdef TRACE
 FILE		*trace;
-FILE		*ctrace;
 #endif
 static bool	 diverged;
 
@@ -27,280 +26,9 @@ static struct sexp SEXP_0 = {.s_kind = S_IMMEDIATE, .s_nargs = 0},
 		   SEXP_00FF = {.s_kind = S_IMMEDIATE, .s_nargs = 0x00ff},
 		   SEXP_NEG_1 = {.s_kind = S_IMMEDIATE, .s_nargs = 0xffff};
 
+// Fast random numbers:
 // 18:16 < rmmh> int k = 0x123456; int rand() { k=30903*(k&65535)+(k>>16);
 //               return(k&65535); }
-
-#ifndef EMU_CHECK
-static void
-ctrans(void)
-{
-	uint16_t instr, localpc = pc_start;
-	unsigned As, Ad, dsrc, ddst, opcode, bw, sx, dx;
-	bool single = false, flagsonly = false, pcchange = false;
-
-	// [reg-2][As]
-	uint16_t constants[2][4] = {
-		{ 0, 0, 4, 8, },
-		{ 0, 1, 2, 0xffff },
-	};
-	// ctrace
-
-	instr = memword(localpc);
-	localpc += 2;
-
-	if (bits(instr, 15, 13) == 0) {
-		single = true;
-		opcode = bits(instr, 9, 7) >> 7;
-		bw = bits(instr, 6, 6)>>6;
-		As = bits(instr, 5, 4)>>4;
-		dsrc = bits(instr, 3, 0);
-	} else {
-		opcode = bits(instr, 15, 12) >> 12;
-		dsrc = bits(instr, 11, 8) >> 8;
-		Ad = bits(instr, 7, 7) >> 7;
-		bw = bits(instr, 6, 6) >> 6;
-		As = bits(instr, 5, 4) >> 4;
-		ddst = bits(instr, 3, 0);
-	}
-
-	// Emit src load
-	if ((dsrc == 2 && As >= 2) || dsrc == 3) {
-		// Constant generator(s)
-		fprintf(ctrace, "\tsrc = 0x%x;\n", constants[dsrc-2][As]);
-	} else if (dsrc == 2 && As == 1) {
-		// Weird SR absolute mode
-		sx = memword(localpc);
-		localpc += 2;
-		fprintf(ctrace, "\tsrc = *(uint16_t*)&memory[0x%x];\n", sx);
-	} else {
-		// Normal addressing ...
-		if (As == 0)
-			fprintf(ctrace, "\tsrc = registers[%d];\n", dsrc);
-		else if (As == 1) {
-			sx = memword(localpc);
-			localpc += 2;
-			ASSERT(dsrc != PC, "TODO");
-			fprintf(ctrace, "\tsrc = *(uint16_t*)&memory[(registers[%d] + 0x%x) & 0xffff];\n",
-			    dsrc, sx);
-		} else if (As == 2) {
-			if (dsrc == PC)
-				fprintf(ctrace, "\tsrc = *(uint16_t*)&memory[0x%x];\n", localpc);
-			else
-				fprintf(ctrace, "\tsrc = *(uint16_t*)&memory[registers[%d]];\n", dsrc);
-		} else {
-			if (dsrc == PC) {
-				sx = memword(localpc);
-				localpc += 2;
-				fprintf(ctrace, "\tsrc = 0x%x;\n", sx);
-			} else {
-				fprintf(ctrace, "\tsrc = *(uint16_t*)&memory[registers[%d]];\n", dsrc);
-				if (dsrc != SP && bw)
-					fprintf(ctrace, "\tregisters[%d]++;\n", dsrc);
-				else
-					fprintf(ctrace, "\tregisters[%d] += 2;\n", dsrc);
-			}
-		}
-	}
-
-	if (!single) {
-		// Emit dst load
-		if (Ad == 0) {
-			if (ddst == PC) {
-				fprintf(ctrace, "\tdst = 0x%x;\n", localpc);
-			} else {
-				fprintf(ctrace, "\tdst = registers[%d];\n", ddst);
-			}
-			if (ddst == CG)
-				flagsonly = true;
-		} else {
-			dx = memword(localpc);
-			localpc += 2;
-
-			if (ddst == SR)
-				fprintf(ctrace, "\tdst = *(uint16_t*)&memory[0x%x];\n", dx);
-			else
-				fprintf(ctrace, "\tdst = *(uint16_t*)&memory[(registers[%d] + 0x%x) & 0xffff];\n",
-				    ddst, dx);
-		}
-	}
-
-	// Ok, operands are loaded.
-	// BYTES FOR THE BYTE GOD
-	if (bw) {
-		fprintf(ctrace, "\tsrc = src & 0xff;\n");
-		if (!single)
-			fprintf(ctrace, "\tdst = dst & 0xff;\n");
-	}
-
-	if (single) {
-		switch (opcode) {
-		case 0: // RRC
-			fprintf(ctrace, "\tres = src >> 1;\n");
-
-			fprintf(ctrace, "\tif (registers[%d] & 0x%x)\n", SR, SR_C);
-			fprintf(ctrace, "\t\tres |= 0x%x;\n", bw? 0x80 : 0x8000);
-
-			fprintf(ctrace, "\tif (src & 1) registers[%d] |= 0x%x;\n", SR, SR_C);
-			fprintf(ctrace, "\telse registers[%d] &= 0x%x;\n", SR, ~SR_C);
-
-			fprintf(ctrace, "\tif (res & 0x8000) registers[%d] |= 0x%x;\n", SR, SR_N);
-
-			fprintf(ctrace, "\tif (res) registers[%d] |= 0x%x;\n", SR, SR_Z);
-			break;
-		case 1: // SWPB
-			fprintf(ctrace, "\tres = ((src & 0xff) << 8) | (src >> 8);\n");
-			break;
-		case 2: // RRA
-			fprintf(ctrace, "\tres = src >> 1;\n");
-			if (bw)
-				fprintf(ctrace, "\tif (0x80 & src) res |= 0x80;\n");
-			else
-				fprintf(ctrace, "\tif (0x8000 & src) res |= 0x8000;\n");
-			fprintf(ctrace, "\tregisters[%d] &= 0x%x;\n", SR, ~SR_Z);
-			fprintf(ctrace, "\tif (0x8000 & res) registers[%d] |= 0x%x;\n", SR, SR_N);
-			break;
-		case 3: // SXT
-			fprintf(ctrace, "\tif (src & 0x80) res = src | 0xff00;\n");
-			fprintf(ctrace, "\telse res = src & 0xff;\n");
-			fprintf(ctrace, "\tandflags_sr(res, &registers[%d]);\n", SR);
-			break;
-		case 4: // PUSH
-			fprintf(ctrace, "\tregisters[%d] -= 2;\n", SP);
-			fprintf(ctrace, "\t*(uint16_t*)&memory[registers[%d]] = src;\n", SP);
-			flagsonly = true;
-			break;
-		case 5: // CALL
-			fprintf(ctrace, "\tregisters[%d] -= 2;\n", SP);
-			fprintf(ctrace, "\t*(uint16_t*)&memory[registers[%d]] = 0x%x;\n", SP, localpc);
-			flagsonly = true;
-			break;
-		default:
-			ASSERT(false, "unimpl");
-			break;
-		}
-	} else {
-		switch (opcode) {
-		case 4: // MOV
-			if (Ad == 0 && ddst == PC)
-				pcchange = true;
-			fprintf(ctrace, "\tres = src;\n");
-			break;
-		case 5: // ADD (fl)
-			fprintf(ctrace, "\tres = (unsigned)src + dst;\n");
-			fprintf(ctrace, "\taddflags_sr(res, %d, &registers[%d]);\n", bw, SR);
-			break;
-		case 6: // ADDC (fl)
-			fprintf(ctrace, "\tres = (unsigned)src + dst + ((registers[%d] & 0x%x)?1:0);\n",
-			    SR, SR_C);
-			fprintf(ctrace, "\taddflags_sr(res, %d, &registers[%d]);\n", bw, SR);
-			break;
-		case 8: // SUB (fl)
-			fprintf(ctrace, "\tres = (unsigned)(~src & 0x%sff) + dst + 1;\n",
-			    bw?"":"ff");
-			fprintf(ctrace, "\taddflags_sr(res, %d, &registers[%d]);\n", bw, SR);
-			break;
-		case 9: // CMP (fl)
-			flagsonly = true;
-			fprintf(ctrace, "\tres = (unsigned)(~src & 0x%sff) + dst + 1;\n",
-			    bw?"":"ff");
-			fprintf(ctrace, "\taddflags_sr(res, %d, &registers[%d]);\n", bw, SR);
-			break;
-		case 0xa: // DADD (fl)
-			fprintf(ctrace, "\t{\n");
-			fprintf(ctrace, "\tunsigned carry = 0, partial; bool setn = false;\n");
-			fprintf(ctrace, "\tres = 0;\n");
-
-			fprintf(ctrace, "\tpartial = (src & 0xf) + (dst & 0xf) + carry;\n");
-			fprintf(ctrace, "\tsetn = !!(partial & 8);\n");
-			fprintf(ctrace, "\tif (partial >= 10) {\n");
-			fprintf(ctrace, "\t\tpartial -= 10;\n");
-			fprintf(ctrace, "\t\tcarry = 1;\n");
-			fprintf(ctrace, "\t} else carry = 0;\n");
-			fprintf(ctrace, "\tres |= (partial & 0xf);\n");
-
-			fprintf(ctrace, "\tpartial = ((src & 0xf0)>>4) + ((dst & 0xf0)>>4) + carry;\n");
-			fprintf(ctrace, "\tsetn = !!(partial & 8);\n");
-			fprintf(ctrace, "\tif (partial >= 10) {\n");
-			fprintf(ctrace, "\t\tpartial -= 10;\n");
-			fprintf(ctrace, "\t\tcarry = 1;\n");
-			fprintf(ctrace, "\t} else carry = 0;\n");
-			fprintf(ctrace, "\tres |= ((partial & 0xf) << 4);\n");
-
-			if (bw == 0) {
-				fprintf(ctrace, "\tpartial = ((src & 0xf00)>>8) + ((dst & 0xf00)>>8) + carry;\n");
-				fprintf(ctrace, "\tsetn = !!(partial & 8);\n");
-				fprintf(ctrace, "\tif (partial >= 10) {\n");
-				fprintf(ctrace, "\t\tpartial -= 10;\n");
-				fprintf(ctrace, "\t\tcarry = 1;\n");
-				fprintf(ctrace, "\t} else carry = 0;\n");
-				fprintf(ctrace, "\tres |= ((partial & 0xf) << 8);\n");
-
-				fprintf(ctrace, "\tpartial = ((src & 0xf000)>>12) + ((dst & 0xf000)>>12) + carry;\n");
-				fprintf(ctrace, "\tsetn = !!(partial & 8);\n");
-				fprintf(ctrace, "\tif (partial >= 10) {\n");
-				fprintf(ctrace, "\t\tpartial -= 10;\n");
-				fprintf(ctrace, "\t\tcarry = 1;\n");
-				fprintf(ctrace, "\t} else carry = 0;\n");
-				fprintf(ctrace, "\tres |= ((partial & 0xf) << 12);\n");
-			}
-
-			fprintf(ctrace, "\tif (setn) registers[%d] |= 0x%x;\n", SR, SR_N);
-			fprintf(ctrace, "\tif (carry) registers[%d] |= 0x%x;\n", SR, SR_C);
-			fprintf(ctrace, "\telse registers[%d] &= 0x%x;\n", SR, ~SR_C);
-
-			fprintf(ctrace, "\t}\n");
-			break;
-		case 0xd: // BIS
-			fprintf(ctrace, "\tres = dst | src;\n");
-			break;
-		case 0xe: // XOR
-			fprintf(ctrace, "\tres = (dst ^ src)%s;\n", bw?" & 0xff":"");
-			fprintf(ctrace, "\tandflags_sr(res, &registers[%d]);\n", SR);
-			break;
-		case 0xf: // AND
-			fprintf(ctrace, "\tres = (dst & src)%s;\n", bw?" & 0xff":"");
-			fprintf(ctrace, "\tandflags_sr(res, &registers[%d]);\n", SR);
-			break;
-		default:
-			ASSERT(false, "x");
-		}
-	}
-
-	if (flagsonly)
-		goto afterwrite;
-
-	if (bw)
-		fprintf(ctrace, "\tres &= 0xff;\n");
-
-	if (single) {
-		if (As == 0)
-			fprintf(ctrace, "\tregisters[%d] = res;\n", dsrc);
-		else if (As == 1)
-			fprintf(ctrace, "\t*(uint%d_t *)&memory[0x%x + registers[%d]] = %sres;\n",
-			    bw? 8 : 16, sx, dsrc, bw? "" : "(uint8_t)");
-		else if (As == 2)
-			fprintf(ctrace, "\t*(uint%d_t *)&memory[registers[%d]] = %sres;\n",
-			    bw? 8 : 16, dsrc, bw? "" : "(uint8_t)");
-		else if (As == 3) {
-			fprintf(ctrace, "\t*(uint%d_t *)&memory[registers[%d]] = %sres;\n",
-			    bw? 8 : 16, dsrc, bw? "" : "(uint8_t)");
-			if (bw && (dsrc != PC && dsrc != SP))
-				fprintf(ctrace, "\tregisters[%d]++;\n", dsrc);
-			else
-				fprintf(ctrace, "\tregisters[%d] += 2;\n", dsrc);
-		}
-	} else {
-		if (Ad == 0)
-			fprintf(ctrace, "\tregisters[%d] = res;\n", ddst);
-		else if (Ad == 1)
-			fprintf(ctrace, "\t*(uint%d_t *)&memory[0x%x + registers[%d]] = %sres;\n",
-			    bw? 8 : 16, sx, ddst, bw? "" : "(uint8_t)");
-	}
-
-afterwrite:
-	ASSERT(localpc == registers[PC] || (single && opcode == 5) || pcchange, "mismatch");
-}
-#endif // EMU_CHECK
 
 #if SYMBOLIC
 static struct sexp *
@@ -354,34 +82,9 @@ void
 init(void)
 {
 
-	//trace = fopen("msp430_trace.txt", "wb");
-	//ASSERT(trace, "fopen");
-#ifndef EMU_CHECK
-	ctrace = fopen("xxx.c", "wb");
-	ASSERT(ctrace, "fopen");
-
-	fputs("#include \"emu.h\"\n\n"
-	    "uint8_t Input[0x100];\n"
-	    "unsigned InputLen;\n"
-	    "bool unlocked = false;\n"
-	    "void\n"
-	    "Xcallgate(void)\n"
-	    "{\n"
-	    "\tif (registers[SR] == 0xff00) {\n"
-	    "\t\tunlocked = true;\n"
-	    "\t} else if (registers[SR] == 0xa000) {\n"
-	    "\t\tregisters[15] = 0;\n"
-	    "\t} else if (registers[SR] == 0x8200) {\n"
-	    "\t\tuint16_t addr = memword(registers[SP] + 8);\n"
-	    "\t\tmemcpy(&memory[addr], Input, InputLen);\n"
-	    "\t}\n"
-	    "}\n"
-	    "void\n"
-	    "try(void)\n"
-	    "{\n"
-	    "\tuint16_t src, dst;\n"
-	    "\tunsigned res;\n"
-	    "\tinit();\n\n", ctrace);
+#ifdef TRACE
+	trace = fopen("msp430_trace.txt", "wb");
+	ASSERT(trace, "fopen");
 #endif
 
 	insns = 0;
@@ -402,13 +105,10 @@ void
 destroy(void)
 {
 
-#ifndef EMU_CHECK
-	fflush(ctrace);
-	fclose(ctrace);
-	//fflush(trace);
-	//fclose(trace);
+#ifdef TRACE
+	fflush(trace);
+	fclose(trace);
 	trace = NULL;
-	ctrace = NULL;
 #endif
 #if SYMBOLIC
 	ASSERT(memory_symbols, "mem_symbol_hash");
@@ -499,6 +199,7 @@ emulate1(void)
 	uint16_t instr;
 
 	pc_start = registers[PC];
+
 #ifdef BF
 	if (registers[PC] & 0x1) {
 		//printf("insn addr unaligned");
@@ -510,21 +211,6 @@ emulate1(void)
 #endif
 
 	instr = memword(registers[PC]);
-#if 0
-	if (insns < 59984)
-		fprintf(trace, "pc:%04x insn:%04x %04x sr:%04x\n",
-		    registers[PC], instr, memword(registers[PC]+2),
-		    registers[SR]);
-#endif
-
-#if 0
-	if (registers[PC] == 0x44c8) {
-		fprintf(trace, "pc:44c8 insn:%04x %04x sr:%04x r12:%04x\n",
-		    instr, memword(registers[PC]+2), registers[SR],
-		    registers[12]);
-		diverged = true;
-	}
-#endif
 
 	// dec r15; jnz -2 busy loop
 	if ((instr == 0x831f || instr == 0x533f) &&
@@ -541,31 +227,8 @@ emulate1(void)
 		registers[SR] &= ~(SR_C | SR_N | SR_V);
 		registers[SR] |= SR_Z;
 		registers[PC] += 4;
-
-#ifndef EMU_CHECK
-		fprintf(ctrace, "\tregisters[15] = 0;\n");
-		fprintf(ctrace, "\tregisters[%d] &= 0x%x;\n", SR,
-		    ~(0xfe00|SR_C|SR_N|SR_V));
-		fprintf(ctrace, "\tregisters[%d] |= 0x%x;\n", SR, SR_Z);
-#endif
 		goto out;
 	}
-
-#if 0
-#if SYMBOLIC
-	if (instr == 0x4ebd && (isregsym(13) || isregsym(14))) {
-		printf("mov @r14+, 0x0(r13)\n");
-		printf("r13 sym? %d\n", isregsym(13));
-		if (isregsym(13))
-			printsym(regsym(13));
-		printf("r14 sym? %d\n", isregsym(14));
-		if (isregsym(14))
-			printsym(regsym(14));
-		print_regs();
-		print_ips();
-	}
-#endif
-#endif
 
 	switch (bits(instr, 15, 13)) {
 	case 0:
@@ -605,22 +268,15 @@ emulate1(void)
 	}
 #endif
 
-#if 0
-	if (bits(instr, 15, 13) != 0x2000 && insns < 59984) {
-		for (unsigned i = 0; i < ((unsigned)registers[PC] - pc_start); i += 2)
-			fprintf(trace, "%02x%02x ", membyte(pc_start+i),
-			    membyte(pc_start+i+1));
-		fprintf(trace, "\n");
+#ifdef TRACE
+	if (registers[PC] > pc_start && registers[PC] - pc_start <= 6) {
+		if (bits(instr, 15, 13) != 0x2000) {
+			for (unsigned i = 0; i < ((unsigned)registers[PC] - pc_start); i += 2)
+				fprintf(trace, "%02x%02x ", (uns)membyte(pc_start+i),
+				    (uns)membyte(pc_start+i+1));
+			fprintf(trace, "\n");
+		}
 	}
-#endif
-
-#if 0
-	// TODO: only emit if tainted/ing?
-	if (bits(instr, 15, 13) != 0x2000)
-		ctrans();
-	if (registers[PC] == 0x0010)
-		fputs("Xcallgate();\n"
-		    "if (unlocked) return;\n", ctrace);
 #endif
 
 out:
