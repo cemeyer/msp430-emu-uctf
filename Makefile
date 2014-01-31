@@ -14,9 +14,11 @@ msp430-emu: main.c emu.h
 msp430-sym: main.c emu.h
 	gcc $(OPTFLAGS) $(SAFEFLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 $< -o $@
 
-check: check_instr.c main.c emu.h
-	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 -DEMU_CHECK $< main.c -o check_instr -lcheck $(GLIB_LDFLAGS) $(EXTRAFLAGS)
+check: check_instr
 	./check_instr
+
+check_instr: check_instr.c main.c emu.h
+	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 -DEMU_CHECK $< main.c -lcheck $(GLIB_LDFLAGS) $(EXTRAFLAGS) -o $@
 
 bfhw: bfhw.c main.c emu.h
 	@rm -f *.gcda

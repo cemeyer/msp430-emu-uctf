@@ -1386,11 +1386,11 @@ START_TEST(test_peephole)
 	ck_assert(res->s_kind == S_XOR);
 	ck_assert(res->s_nargs == 3);
 	ck_assert(res->s_arg[0]->s_kind == S_INP);
-	ck_assert(res->s_arg[0]->s_nargs == 2);
+	ck_assert(res->s_arg[0]->s_nargs == 0);
 	ck_assert(res->s_arg[1]->s_kind == S_INP);
-	ck_assert(res->s_arg[1]->s_nargs == 0);
+	ck_assert(res->s_arg[1]->s_nargs == 1);
 	ck_assert(res->s_arg[2]->s_kind == S_INP);
-	ck_assert(res->s_arg[2]->s_nargs == 1);
+	ck_assert(res->s_arg[2]->s_nargs == 2);
 }
 END_TEST
 
@@ -1642,44 +1642,60 @@ START_TEST(test_peephole10)
 	//
 	// (^ (>> X imm) (>> Y imm))
 	struct sexp *tests[] = {
+		mksexp(S_AND, 2,
+		    mkinp(0),
+		    sexp_imm_alloc(0)),
 		mksexp(S_RSHIFT, 2,
 		    mksexp(S_XOR, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf5)),
 		    sexp_imm_alloc(8)),
 		mksexp(S_RSHIFT, 2,
 		    mksexp(S_AND, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf5)),
 		    sexp_imm_alloc(8)),
 		mksexp(S_RSHIFT, 2,
 		    mksexp(S_OR, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf5)),
 		    sexp_imm_alloc(8)),
 		mksexp(S_LSHIFT, 2,
 		    mksexp(S_XOR, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf500)),
 		    sexp_imm_alloc(8)),
 		mksexp(S_LSHIFT, 2,
 		    mksexp(S_AND, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf500)),
 		    sexp_imm_alloc(8)),
 		mksexp(S_LSHIFT, 2,
 		    mksexp(S_OR, 2,
-			mkinp(0),
+			mksexp(S_LSHIFT, 2,
+			    mkinp(0),
+			    sexp_imm_alloc(8)),
 			sexp_imm_alloc(0xf500)),
 		    sexp_imm_alloc(8)),
 	};
 	struct sexp *exp[] = {
+		sexp_imm_alloc(0),
 		mkinp(0),
 		sexp_imm_alloc(0),
 		mkinp(0),
-		mkinp(0),
 		sexp_imm_alloc(0),
-		mkinp(0),
+		sexp_imm_alloc(0),
+		sexp_imm_alloc(0),
 	};
 
 	for (unsigned i = 0; i < ARRAYLEN(tests); i++) {
@@ -1690,7 +1706,7 @@ START_TEST(test_peephole10)
 		//printsym(res);
 
 		if (!sexp_eq(exp[i], res)) {
-			printf("Expected: ");
+			printf("Expected[%u]: ", i);
 			printsym(exp[i]);
 			printf("Actual: ");
 			printsym(res);
@@ -1842,6 +1858,10 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole9);
 	tcase_add_test(tsymbolic, test_peephole10);
 	suite_add_tcase(s, tsymbolic);
+
+	TCase *tsymbolicd = tcase_create("symbolic-debug");
+	tcase_add_checked_fixture(tsymbolicd, setup_machine, teardown_machine);
+	suite_add_tcase(s, tsymbolicd);
 #endif
 
 	return s;
