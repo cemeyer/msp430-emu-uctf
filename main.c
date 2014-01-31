@@ -2096,7 +2096,11 @@ static struct sexp *
 peep_flatten(struct sexp *s, bool *changed)
 {
 
-	ASSERT(s->s_nargs > 0, "huh?");
+	if (s->s_nargs == 0) {
+		printf("args = 0 >>\n");
+		printsym(s);
+		ASSERT(false, "args");
+	}
 
 	switch (s->s_kind) {
 	case S_PLUS:
@@ -2201,6 +2205,9 @@ peep_xorident(struct sexp *s, bool *changed)
 
 				*changed = true;
 				ASSERT(i < j, "by-definition");
+
+				if (s->s_nargs == 2)
+					return &SEXP_0;
 
 				res = mksexp(S_XOR, 0);
 				for (k = 0; k < i; k++)
@@ -2673,6 +2680,34 @@ peep_shiftimm(struct sexp *s, bool *changed)
 	return s;
 }
 
+static struct sexp	*orand_sub;
+static uint16_t		 orand_im1,
+			 orand_im2;
+STATIC_PATTERN(orand_pat,
+    mksexp(S_OR, 2,
+	mksexp(S_AND, 2,
+	    subsexp(&orand_sub),
+	    subimm(&orand_im1)),
+	subimm(&orand_im2)));
+
+// (| (& X im1) im2)
+// iff (im1 & im2) == im1
+// -> im2
+static struct sexp *
+peep_orandreduce(struct sexp *s, bool *changed)
+{
+
+	orand_sub = NULL;
+	orand_im1 = orand_im2 = 0;
+
+	if (sexpmatch(orand_pat, s) && (orand_im1 & orand_im2) == orand_im1) {
+		*changed = true;
+		return sexp_imm_alloc(orand_im2);
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2761,6 +2796,7 @@ peephole(struct sexp *s)
 		APPLYPEEP(S_MATCH_ANY, 2, peep_shiftimm);
 		APPLYPEEP(S_LSHIFT, 2, peep_dlshiftflatten);
 		APPLYPEEP(S_RSHIFT, 2, peep_drshiftflatten);
+		APPLYPEEP(S_OR, 2, peep_orandreduce);
 	} while (changed);
 
 	return s;
