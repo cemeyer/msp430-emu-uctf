@@ -1787,7 +1787,7 @@ _printsym(struct sexp *sym, unsigned indent)
 		ASSERT(sym->s_nargs == 2, "x");
 		break;
 	case S_RRA:
-		printf(">>/");
+		printf("rra");
 		ASSERT(sym->s_nargs == 2, "x");
 		break;
 	case S_SXT:
@@ -2047,6 +2047,7 @@ peep_expfirst(struct sexp *s, bool *changed)
 	case S_OR:
 	case S_AND:
 	case S_XOR:
+	case S_EQ:
 		if (s->s_arg[0]->s_kind == S_IMMEDIATE &&
 		    s->s_arg[1]->s_kind != S_IMMEDIATE) {
 			struct sexp **t;
@@ -2429,11 +2430,13 @@ peep_rshiftcancel(struct sexp *s, bool *changed)
 static struct sexp *
 peep_rra(struct sexp *s, bool *changed)
 {
+	struct sexp *newargs[SEXP_MAXARGS] = { 0 },
+		    *inner = s->s_arg[0],
+		    *res;
 
-	ASSERT(s->s_arg[1]->s_kind == S_IMMEDIATE &&
-	    s->s_arg[1]->s_nargs == 1, "rra");
+	ASSERT(s->s_arg[1]->s_kind == S_IMMEDIATE, "x");
 
-	switch (s->s_arg[0]->s_kind) {
+	switch (inner->s_kind) {
 	case S_OR:
 	case S_XOR:
 	case S_AND:
@@ -2444,10 +2447,13 @@ peep_rra(struct sexp *s, bool *changed)
 	}
 
 	*changed = true;
-	s = s->s_arg[0];
-	for (unsigned i = 0; i < s->s_nargs; i++)
-		s->s_arg[i] = mksexp(S_RRA, 2, s->s_arg[i], &SEXP_1);
-	return s;
+	for (unsigned i = 0; i < inner->s_nargs; i++)
+		newargs[i] = mksexp(S_RRA, 2, inner->s_arg[i], s->s_arg[1]);
+
+	res = mksexp(inner->s_kind, 0);
+	memcpy(res->s_arg, newargs, inner->s_nargs * sizeof(struct sexp *));
+	res->s_nargs = inner->s_nargs;
+	return res;
 }
 
 // move XOR's inwards
@@ -2758,6 +2764,32 @@ peep_andshift(struct sexp *s, bool *changed)
 	return s;
 }
 
+static struct sexp	*rraflat_sub;
+static uint16_t		 rraflat_im1,
+			 rraflat_im2;
+STATIC_PATTERN(rraflat_pat,
+    mksexp(S_RRA, 2,
+	mksexp(S_RRA, 2,
+	    subsexp(&rraflat_sub),
+	    subimm(&rraflat_im1)),
+	subimm(&rraflat_im2)));
+
+static struct sexp *
+peep_rraflatten(struct sexp *s, bool *changed)
+{
+
+	rraflat_sub = NULL;
+	rraflat_im1 = rraflat_im2 = 0;
+
+	if (!sexpmatch(rraflat_pat, s))
+		return s;
+
+	*changed = true;
+	return mksexp(S_RRA, 2,
+	    rraflat_sub,
+	    sexp_imm_alloc(rraflat_im1 + rraflat_im2));
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2848,6 +2880,7 @@ peephole(struct sexp *s)
 		APPLYPEEP(S_RSHIFT, 2, peep_drshiftflatten);
 		APPLYPEEP(S_OR, 2, peep_orandreduce);
 		APPLYPEEP(S_AND, 2, peep_andshift);
+		APPLYPEEP(S_RRA, 2, peep_rraflatten);
 	} while (changed);
 
 	return s;
