@@ -20,8 +20,3 @@ Emulating
 =========
 
 Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
-
-TODO
-====
-
-* Fix symbolic to do something reasonable on HW.
