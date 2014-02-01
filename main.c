@@ -907,40 +907,12 @@ handle_double(uint16_t instr)
 		}
 #endif
 		break;
-	case 0x8000:
-		// SUB (flags)
-#if SYMBOLIC
-		if (srcsym) {
-			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
-			if (bw) {
-				srcsym = peephole(bytemask(srcsym));
-				dstsym = peephole(bytemask(dstsym));
-			}
-			ressym = mksexp(S_PLUS, 3, srcsym, dstsym,
-			    sexp_imm_alloc(1));
-			flagsym = mksexp(S_AND, 2,
-			    mksexp(S_SR, 1, peephole(ressym)),
-			    &SEXP_00FF);
-		} else {
-#endif
-			srcnum = ~srcnum & 0xffff;
-			if (bw) {
-				dstnum &= 0xff;
-				srcnum &= 0xff;
-			}
-			res = dstnum + srcnum + 1;
-			addflags(res, bw, &setflags, &clrflags);
-			if (bw)
-				res &= 0x00ff;
-			else
-				res &= 0xffff;
-#if SYMBOLIC
-		}
-#endif
-		break;
 	case 0x9000:
 		// CMP (flags)
 		dstkind = OP_FLAGSONLY;
+		// FALLTHROUGH
+	case 0x8000:
+		// SUB (flags)
 #if SYMBOLIC
 		if (srcsym) {
 			srcsym = mksexp(S_XOR, 2, srcsym, &SEXP_NEG_1);
@@ -1046,6 +1018,10 @@ handle_double(uint16_t instr)
 		}
 #endif
 		break;
+	case 0xb000:
+		// BIT
+		dstkind = OP_FLAGSONLY;
+		// FALLTHROUGH
 	case 0xf000:
 		// AND (flags)
 #if SYMBOLIC

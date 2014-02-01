@@ -1324,6 +1324,23 @@ START_TEST(test_adc_indpc)
 }
 END_TEST
 
+START_TEST(test_bit)
+{
+	uint16_t code[] = {
+		0xb315,		// bit #0x1, r5
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = SR_C;
+	registers[5] = 1;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+	ck_assert_flags(SR_C);
+}
+END_TEST
+
 #if SYMBOLIC
 START_TEST(test_symbolic)
 {
@@ -1995,6 +2012,11 @@ suite_instr(void)
 	tcase_add_checked_fixture(tsymbolicd, setup_machine, teardown_machine);
 	suite_add_tcase(s, tsymbolicd);
 #endif
+
+	TCase *tbit = tcase_create("bit");
+	tcase_add_checked_fixture(tbit, setup_machine, teardown_machine);
+	tcase_add_test(tbit, test_bit);
+	suite_add_tcase(s, tbit);
 
 	return s;
 }
