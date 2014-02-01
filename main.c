@@ -2794,6 +2794,64 @@ peep_rraflatten(struct sexp *s, bool *changed)
 	    sexp_imm_alloc(rraflat_im1 + rraflat_im2));
 }
 
+static struct sexp	*rradrop_sub;
+static uint16_t		 rradrop_im1,
+			 rradrop_im2;
+
+STATIC_PATTERN(rradrop_pand,
+    mksexp(S_RRA, 2,
+	mksexp(S_AND, 2,
+	    subsexp(&rradrop_sub),
+	    subimm(&rradrop_im1)),
+	subimm(&rradrop_im2)));
+
+STATIC_PATTERN(rradrop_psr,
+    mksexp(S_RRA, 2,
+	mksexp(S_SR, 1,
+	    subsexp(&rradrop_sub)),
+	subimm(&rradrop_im1)));
+
+STATIC_PATTERN(rradrop_pinp,
+    mksexp(S_RRA, 2,
+	subsexp(&rradrop_sub),
+	subimm(&rradrop_im1)));
+
+static struct sexp *
+peep_rradrop(struct sexp *s, bool *changed)
+{
+
+	rradrop_sub = NULL;
+	rradrop_im1 = rradrop_im2 = 0;
+
+	if (sexpmatch(rradrop_pand, s)) {
+		// (rra (and X im1) im2) -> (>> (and X im1) im2)
+		// iff (im1 & 0x8000) == 0
+		if (rradrop_im1 & 0x8000)
+			return s;
+
+		*changed = true;
+		return mksexp(S_RSHIFT, 2,
+		    s->s_arg[0],
+		    s->s_arg[1]);
+	} else if (sexpmatch(rradrop_psr, s)) {
+		// (rra (sr X) Y) -> (>> (sr X) Y)
+
+		*changed = true;
+		return mksexp(S_RSHIFT, 2,
+		    s->s_arg[0],
+		    s->s_arg[1]);
+	} else if (sexpmatch(rradrop_pinp, s) && rradrop_sub->s_kind == S_INP) {
+		// (rra inp im) -> (>> inp im)
+
+		*changed = true;
+		return mksexp(S_RSHIFT, 2,
+		    s->s_arg[0],
+		    s->s_arg[1]);
+	}
+
+	return s;
+}
+
 typedef struct sexp *(*visiter_cb)(struct sexp *, bool *);
 
 struct sexp *
@@ -2885,6 +2943,7 @@ peephole(struct sexp *s)
 		APPLYPEEP(S_OR, 2, peep_orandreduce);
 		APPLYPEEP(S_AND, 2, peep_andshift);
 		APPLYPEEP(S_RRA, 2, peep_rraflatten);
+		APPLYPEEP(S_RRA, 2, peep_rradrop);
 	} while (changed);
 
 	return s;

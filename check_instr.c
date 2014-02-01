@@ -1790,10 +1790,57 @@ START_TEST(test_peephole14)
 	res = peephole(test);
 	//printsym(res);
 
-	ck_assert(sexp_eq(mksexp(S_RRA, 2,
+	ck_assert(sexp_eq(mksexp(S_RSHIFT, 2,
 		    mkinp(0),
 		    sexp_imm_alloc(2)),
 		res));
+}
+END_TEST
+
+START_TEST(test_peephole15)
+{
+	struct sexp *tests[] = {
+		mksexp(S_RRA, 2,
+		    mksexp(S_AND, 2,
+			mkinp(0),
+			sexp_imm_alloc(0x7fff)),
+		    sexp_imm_alloc(1)),
+		mksexp(S_RRA, 2,
+		    mkinp(0),
+		    sexp_imm_alloc(1)),
+		mksexp(S_RRA, 2,
+		    mksexp(S_SR, 1,
+			mkinp(0)),
+		    sexp_imm_alloc(1)),
+	};
+	struct sexp *exp[] = {
+		mksexp(S_RSHIFT, 2,
+		    mkinp(0),
+		    tests[0]->s_arg[1]),
+		mksexp(S_RSHIFT, 2,
+		    tests[1]->s_arg[0],
+		    tests[1]->s_arg[1]),
+		mksexp(S_RSHIFT, 2,
+		    tests[2]->s_arg[0],
+		    tests[2]->s_arg[1]),
+	};
+
+	for (unsigned i = 0; i < ARRAYLEN(tests); i++) {
+		struct sexp *res;
+
+		//printsym(tests[i]);
+		res = peephole(tests[i]);
+		//printsym(res);
+
+		if (!sexp_eq(exp[i], res)) {
+			printf("Expected[%u]: ", i);
+			printsym(exp[i]);
+			printf("Actual: ");
+			printsym(res);
+
+			ck_abort();
+		}
+	}
 }
 END_TEST
 #endif // SYMBOLIC
@@ -1941,6 +1988,7 @@ suite_instr(void)
 	tcase_add_test(tsymbolic, test_peephole12);
 	tcase_add_test(tsymbolic, test_peephole13);
 	tcase_add_test(tsymbolic, test_peephole14);
+	tcase_add_test(tsymbolic, test_peephole15);
 	suite_add_tcase(s, tsymbolic);
 
 	TCase *tsymbolicd = tcase_create("symbolic-debug");
