@@ -865,7 +865,7 @@ handle_double(uint16_t instr)
 				dstsym = peephole(bytemask(dstsym));
 			}
 			ressym = peephole(mksexp(S_PLUS, 2, srcsym, dstsym));
-			flagsym = mksexp(S_SR, 1, ressym);
+			flagsym = mksexp(S_AND, 2, mksexp(S_SR, 1, ressym), &SEXP_00FF);
 		} else {
 #endif
 			if (bw) {
@@ -918,7 +918,9 @@ handle_double(uint16_t instr)
 			}
 			ressym = mksexp(S_PLUS, 3, srcsym, dstsym,
 			    sexp_imm_alloc(1));
-			flagsym = mksexp(S_SR, 1, peephole(ressym));
+			flagsym = mksexp(S_AND, 2,
+			    mksexp(S_SR, 1, peephole(ressym)),
+			    &SEXP_00FF);
 		} else {
 #endif
 			srcnum = ~srcnum & 0xffff;
@@ -948,7 +950,9 @@ handle_double(uint16_t instr)
 			}
 			ressym = mksexp(S_PLUS, 3, srcsym, dstsym,
 			    sexp_imm_alloc(1));
-			flagsym = mksexp(S_SR, 1, peephole(ressym));
+			flagsym = mksexp(S_AND, 2,
+			    mksexp(S_SR, 1, peephole(ressym)),
+			    &SEXP_00FF);
 		} else {
 #endif
 			srcnum = ~srcnum & 0xffff;
