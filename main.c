@@ -1,6 +1,7 @@
 #include "emu.h"
 
 uint16_t	 pc_start;
+uint8_t		 pageprot[0x100];
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
 #if SYMBOLIC
@@ -13,6 +14,7 @@ uint64_t	 insnlimit;
 uint16_t	 syminplen;
 bool		 off;
 bool		 unlocked;
+bool		 dep_enabled;
 bool		 ctrlc;
 
 #ifdef TRACE
@@ -95,6 +97,8 @@ init(void)
 	start = now();
 	//memset(memory, 0, sizeof(memory));
 	memset(registers, 0, sizeof registers);
+	memset(pageprot, DEP_R|DEP_W|DEP_X, sizeof pageprot);
+	dep_enabled = false;
 #if SYMBOLIC
 	memory_symbols = g_hash_table_new(NULL, NULL);
 	ASSERT(memory_symbols, "g_hash");
@@ -221,6 +225,7 @@ emulate1(void)
 	ASSERT((registers[PC] & 0x1) == 0, "insn addr unaligned");
 #endif
 
+	depcheck(registers[PC], DEP_X);
 	instr = memword(registers[PC]);
 
 	// dec r15; jnz -2 busy loop
@@ -729,6 +734,7 @@ handle_single(uint16_t instr)
 				delmemsyms(dstval, bw);
 #endif
 
+			depcheck(dstval, DEP_W);
 			if (bw)
 				memory[dstval] = (res & 0xff);
 			else
@@ -1112,7 +1118,7 @@ handle_double(uint16_t instr)
 			if (ismemsym(dstval, bw))
 				delmemsyms(dstval, bw);
 #endif
-
+			depcheck(dstval, DEP_W);
 			if (bw)
 				memory[dstval] = (res & 0xff);
 			else
@@ -1562,8 +1568,9 @@ callgate(unsigned op)
 		bufsz = (uns)memword(argaddr+2);
 #if SYMBOLIC
 		ASSERT((uns)getsaddr + (uns)bufsz < 0x10000, "overflow");
-		memset(&memory[getsaddr], 0, bufsz);
-		for (unsigned i = 0; i < min((uns)syminplen, bufsz); i++) {
+		bufsz = min((uns)syminplen, bufsz-1);
+		memset(&memory[getsaddr], 0, bufsz+1);
+		for (unsigned i = 0; i < bufsz; i++) {
 			struct sexp *s;
 
 			s = sexp_alloc(S_INP);
@@ -1575,6 +1582,32 @@ callgate(unsigned op)
 #else
 		getsn(getsaddr, bufsz);
 #endif
+		break;
+	case 0x10:
+		// Turn on DEP
+		if (dep_enabled)
+			break;
+		for (unsigned i = 0; i < sizeof(pageprot); i++) {
+			if ((pageprot[i] & DEP_W) && (pageprot[i] & DEP_X)) {
+				printf("Enable DEP invalid: page %u +WX!\n",
+				    i);
+				abort_nodump();
+			}
+		}
+		dep_enabled = true;
+		break;
+	case 0x11:
+		// Set page protection
+		{
+		uint16_t page, wr;
+		page = memword(argaddr);
+		wr = memword(argaddr+2);
+
+		ASSERT(page < 0x100, "page");
+		ASSERT(wr == 0 || wr == 1, "w/x");
+
+		pageprot[page] &= ~( wr? DEP_X : DEP_W );
+		}
 		break;
 	case 0x20:
 		// RNG
@@ -1628,15 +1661,15 @@ getsn(uint16_t addr, uint16_t bufsz)
 	if (fgets(buf, 2 * bufsz + 2, stdin) == NULL)
 		goto out;
 
-	if (buf[0] != ':')
+	if (buf[0] != ':') {
 		strncpy((char*)&memory[addr], buf, bufsz);
-	else {
+		memory[addr + strlen(buf)] = 0;
+	} else {
 		for (unsigned i = 0; i < bufsz - 1u; i++) {
 			unsigned byte;
 
 			if (buf[2*i+1] == 0 || buf[2*i+2] == 0) {
 				memory[addr+i] = 0;
-				memory[addr+i+1] = 0;
 				break;
 			}
 
@@ -1645,7 +1678,6 @@ getsn(uint16_t addr, uint16_t bufsz)
 			memory[addr + i] = byte;
 		}
 	}
-	memory[addr + bufsz - 1] = 0;
 out:
 	free(buf);
 }
@@ -3086,3 +3118,18 @@ sexpmatch(struct sexp *needle, struct sexp *haystack)
 	return true;
 }
 #endif
+
+void
+depcheck(uint16_t addr, unsigned perm)
+{
+
+	if (!dep_enabled)
+		return;
+
+	if (pageprot[addr >> 8] & perm)
+		return;
+
+	printf("DEP: Page 0x%02x is not %s!\n", (uns)addr >> 8,
+	    (perm == DEP_W)? "writable" : "executable");
+	abort_nodump();
+}
