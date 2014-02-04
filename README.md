@@ -20,8 +20,3 @@ Emulating
 =========
 
 Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
-
-TODO
-======
-
-Detect or even handle symbolic DEP.
