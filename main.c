@@ -491,6 +491,11 @@ handle_single(uint16_t instr)
 #endif
 
 	inc_reg(PC, 0);
+
+	// Bogus initialization for GCC
+	srcval = 0xffff;
+	srckind = OP_FLAGSONLY;
+
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 
 	if (off)
@@ -770,8 +775,10 @@ handle_double(uint16_t instr)
 
 	inc_reg(PC, 0);
 
-	//printf("Src,Ad,bw,As,Dst\n%#04x,%#02x,%#02x,%#02x,%#04x\n", (uns)dsrc,
-	//    (uns)Ad, (uns)bw, (uns)As, (uns)ddst);
+	// Bogus initialization to quiet GCC
+	srckind = OP_FLAGSONLY;
+	srcval = 0xffff;
+
 	load_src(instr, dsrc, As, bw, &srcval, &srckind);
 	load_dst(instr, ddst, Ad, &dstval, &dstkind);
 
