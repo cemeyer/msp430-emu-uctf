@@ -1,5 +1,5 @@
-FLAGS=-Wall -Wextra -std=gnu99 -Wno-unused-function -Wno-unused-variable
-SAFEFLAGS=$(FLAGS) -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4
+FLAGS=-Wall -Wextra -std=gnu99 -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter
+SAFEFLAGS=$(FLAGS) -lrt 
 #OPTFLAGS=`rpm -E %optflags` -O3
 EXTRAFLAGS=
 NEWGCCFLAGS=-grecord-gcc-switches

@@ -21,6 +21,13 @@ Emulating
 
 Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
 
+GDB
+========
+
+This new version waits for gdb on startup. Use a msp430 gdb to connect (using
+'target remote :1337'). Supported commands are reading/writing registers and
+memory, stepping (si), continue and breakpoints.
+
 License
 =======
 

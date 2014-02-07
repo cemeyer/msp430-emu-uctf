@@ -13,6 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netinet/in.h>
+#include <assert.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 
 #include <glib.h>
 
@@ -26,6 +34,13 @@
 	typeof(y) _min2 = (y);			\
 	(void) (&_min1 == &_min2);		\
 	_min1 < _min2 ? _min1 : _min2; })
+
+// Network stuff
+#define LISTEN_BACKLOG 1024
+#define SERVER_PORT  1337
+#define MAX_POLL 3
+
+
 
 #if SYMBOLIC
 enum sexp_kind {
