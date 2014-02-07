@@ -222,6 +222,13 @@ void	load_dst(uint16_t instr, uint16_t instr_decode_dst,
 
 void	print_ips(void);
 
+// GDB stuff
+void	gdbstub_init(void);
+void	gdbstub_intr(void);
+void	gdbstub_stopped(void);
+void	gdbstub_interactive(void);
+void	gdbstub_breakpoint(void);
+
 #ifdef REALLYFAST
 inline void
 addflags(unsigned res, uint16_t bw, uint16_t *set, uint16_t *clr)

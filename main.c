@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 #include "emu.h"
 
 uint16_t	 pc_start;
@@ -139,23 +141,57 @@ ctrlc_handler(int s)
 	ctrlc = true;
 }
 
+void
+usage(void)
+{
+#if SYMBOLIC
+	printf("usage: msp430-sym [binaryimage] [sym-inp-len]\n");
+#else
+	printf("usage: msp430-emu FLAGS [binaryimage]\n"
+		"\n"
+		"  FLAGS:\n"
+		"    -g    Debug with GDB\n");
+#endif
+		exit(1);
+}
+
 int
 main(int argc, char **argv)
 {
 	size_t rd, idx;
+	const char *romfname;
 	FILE *romfile;
+	int opt;
+	bool waitgdb = false;
 
 #if SYMBOLIC
-	if (argc < 3) {
-		printf("usage: msp430-sym [binaryimage] [sym-inp-len]\n");
+	if (argc < 3)
 #else
-	if (argc < 2) {
-		printf("usage: msp430-emu [binaryimage]\n");
+	if (argc < 2)
 #endif
-		exit(1);
+		usage();
+
+#if SYMBOLIC
+	romfname = argv[1];
+#else
+	while ((opt = getopt(argc, argv, "g")) != -1) {
+		switch (opt) {
+		case 'g':
+			waitgdb = true;
+			break;
+		default:
+			usage();
+			break;
+		}
 	}
 
-	romfile = fopen(argv[1], "rb");
+	if (optind >= argc)
+		usage();
+
+	romfname = argv[optind];
+#endif
+
+	romfile = fopen(romfname, "rb");
 	ASSERT(romfile, "fopen");
 
 #if SYMBOLIC
@@ -179,10 +215,16 @@ main(int argc, char **argv)
 	signal(SIGINT, ctrlc_handler);
 
 	registers[PC] = memword(0xfffe);
-	emulate();
-	printf("Got CPUOFF, stopped.\n");
-	print_regs();
 
+	if (waitgdb)
+		gdbstub_init();
+
+	emulate();
+
+	printf("Got CPUOFF, stopped.\n");
+	gdbstub_stopped();
+
+	print_regs();
 	print_ips();
 
 	return 0;
@@ -212,6 +254,8 @@ void
 emulate1(void)
 {
 	uint16_t instr;
+
+	gdbstub_intr();
 
 	pc_start = registers[PC];
 
@@ -1382,6 +1426,8 @@ abort_nodump(void)
 
 	print_regs();
 	print_ips();
+
+	gdbstub_stopped();
 	exit(1);
 }
 
@@ -1636,6 +1682,9 @@ callgate(unsigned op)
 		unhandled(0x4130);
 		break;
 	}
+
+	if (op > 0)
+		gdbstub_breakpoint();
 }
 
 void
