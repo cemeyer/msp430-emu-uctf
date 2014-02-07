@@ -17,6 +17,22 @@ bool		 unlocked;
 bool		 dep_enabled;
 bool		 ctrlc;
 
+// Network global vars
+struct pollfd fds[MAX_POLL];
+int nfds = 1;
+int listen_sd;
+int connected = 0;
+int cont = 0;
+int step = 0;
+int nextstep = 0;
+
+struct bp {
+  int addr;
+  struct bp *next;
+};
+
+struct bp *breakpoints = NULL;
+
 #ifdef TRACE
 FILE		*trace;
 #endif
@@ -144,6 +160,13 @@ main(int argc, char **argv)
 {
 	size_t rd, idx;
 	FILE *romfile;
+  int    len, rc, on = 1;
+  int    flags;
+  int    desc_ready;
+  int    close_conn;
+  char   buffer[80];
+  struct sockaddr_in   addr;
+  int    current_size = 0, i, j;
 
 #if SYMBOLIC
 	if (argc < 3) {
@@ -175,6 +198,36 @@ main(int argc, char **argv)
 	memwriteword(0x10, 0x4130); // callgate
 
 	fclose(romfile);
+
+
+// Init Network
+  listen_sd = socket(AF_INET, SOCK_STREAM, 0);
+  assert(listen_sd >= 0);
+
+  rc = setsockopt(listen_sd, SOL_SOCKET,  SO_REUSEADDR, (char *)&on, sizeof(on));
+  assert(rc >= 0);
+
+  flags = fcntl(listen_sd,  F_GETFL, 0);
+  rc = fcntl(listen_sd, F_SETFL, flags | O_NONBLOCK);
+  assert(rc >= 0);
+
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family      = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  addr.sin_port        = htons(SERVER_PORT);
+  rc = bind(listen_sd, (struct sockaddr *)&addr, sizeof(addr));
+  assert(rc >= 0);
+
+  rc = listen(listen_sd, LISTEN_BACKLOG);
+  assert(rc >= 0);
+
+  memset(fds, 0 , sizeof(fds));
+  fds[0].fd = listen_sd;
+  fds[0].events = POLLIN;
+
+  breakpoints = malloc(sizeof(struct bp));
+  breakpoints->next = NULL;
+  breakpoints->addr = 0xFFFFF;
 
 	signal(SIGINT, ctrlc_handler);
 
@@ -310,6 +363,264 @@ dumpmem(uint16_t addr, unsigned len)
 	}
 }
 
+int cksum(char *str){
+  int sum = 0;
+  char *p;
+
+  for(p=str; *p; p++){
+    sum += *p;
+  }
+
+  sum = sum % 256;
+
+  return sum;
+}
+
+  
+void send_str(char *str){
+  int rc;
+  unsigned char ck;
+  char buffer[4096];
+  int len;
+
+  memset(buffer, 0, 4096);
+
+  ck = cksum(str);
+
+  len = snprintf(buffer, 4096, "$%s#%02x", str, ck);
+
+  rc = send(fds[connected].fd, buffer, len, 0);
+  assert(rc > 0);
+}
+
+int is_break(int addr){
+  struct bp *b;
+
+  for(b=breakpoints; b; b = b->next){
+    if(b->addr == addr){
+      return 1;
+    }
+  }
+  return 0;
+}
+
+void add_break(int addr){
+  struct bp *b;
+  
+  b = malloc(sizeof(struct bp));
+  b->addr = addr;
+
+  b->next = breakpoints;
+
+  breakpoints = b;
+}
+
+void remove_break(int addr){
+  struct bp *b;
+  struct bp *old = NULL;
+
+  if(addr == 0x10){
+    return;
+  }
+
+  for(b=breakpoints; b; b = b->next){
+    if(b->addr == addr){
+      if(old == NULL){
+        breakpoints = b->next;
+        free(b);
+      } else {
+        old->next = b->next;
+        free(b);
+      }
+    }
+    old = b;
+  }
+}
+
+
+void breakpoint(void){
+  cont = 0;
+  send_str("S05");
+}
+
+
+void handle_gdb_command(char *str, int size){
+  int rc;
+  int i;
+  char buffer[4096];
+  int len;
+  int start, memreadsize;
+  int reg;
+  char *buf;
+
+  if(str[0] == '+' || str[0] == '-'){
+    return;
+  }
+
+  memset(buffer, 0, 4096);
+
+  // ACK
+  rc = send(fds[connected].fd, "+", 1, 0);
+  assert(rc > 0);
+
+
+  if(strncmp(str, "$g", 2) == 0){
+    for(i=0; i < 16; i++){
+      len += sprintf(buffer + len, "%02x%02x", registers[i] & 0xff, (registers[i] >> 8) & 0xff);
+    }
+    return send_str(buffer);
+  }
+  if(strncmp(str, "$G", 2) == 0){
+    buf = str + 2;
+    for(i=0; i < 16; i++){
+      sscanf(buf, "%04x", &reg);
+      registers[i] = ((reg & 0xff) << 8) | ((reg & 0xff00) >> 8);
+      buf += 4;
+    }
+    return send_str("OK");
+  }
+
+  if(strncmp(str, "$m", 2) == 0){
+    sscanf(str, "$m%x,%x", &start, &memreadsize);
+    len = 0;
+    for(i=0;i<memreadsize;i+=4){
+      len += sprintf(buffer + len, "%02x%02x%02x%02x", memory[start + i + 3],
+          memory[start + i + 2], memory[start + i + 1], memory[start + i]);
+    }
+    return send_str(buffer);
+  }
+  if(strncmp(str, "$M", 2) == 0){
+    sscanf(str, "$M%x,%x:%s", &start, &memreadsize, buffer);
+    assert(memreadsize == 2);
+    sscanf(buffer, "%x", &reg);
+    memory[start] = reg & 0xff;
+    memory[start + 1] = reg >> 8;
+
+    return send_str("OK");
+  }
+  if(strncmp(str, "$Z0", 2) == 0){
+    sscanf(str, "$Z0,%x", &start);
+    add_break(start);
+    return send_str("OK");
+  }
+
+  if(strncmp(str, "$z0", 2) == 0){
+    sscanf(str, "$z0,%x", &start);
+    remove_break(start);
+    return send_str("OK");
+  }
+
+  if(strncmp(str, "$qAttached", 10) == 0){
+    return send_str("1");
+  }
+  if(strncmp(str, "$?", 2)==0){
+    return send_str("S05");
+  }
+  if(strncmp(str, "$Hg", 3)==0){
+    return send_str("OK");
+  }
+  if(strncmp(str, "$Hc", 3)==0){
+    return send_str("OK");
+  }
+  if(strncmp(str, "$c", 2)==0){
+    cont = 1;
+    step = 0;
+    return ;
+  }
+  if(strncmp(str, "$s", 2)==0){
+    step = 1;
+    nextstep = 1;
+    return send_str("S05");
+  }
+
+
+
+  return send_str("");
+}
+
+void handle_gdb(void){
+  int i;
+  int rc, new_sd, len;
+  char buffer[4096];
+  char cksum[2];
+
+
+  do{
+    rc = poll(fds, nfds, 1); // wait 1 ms
+    assert(rc >= 0);
+
+    for (i = 0; i < nfds; i++) {
+      if(fds[i].revents != POLLIN)
+        continue;
+
+      if (fds[i].fd == listen_sd) {
+        // new connection
+        do {
+          new_sd = accept(listen_sd, NULL, NULL);
+          if (new_sd < 0) {
+            if (errno != EWOULDBLOCK) {// EWOULDBLOCK == we have accepted all incoming connection
+              perror("  accept() failed");
+              exit(EXIT_FAILURE);
+            }
+            break;
+          }
+
+          printf("  New incoming connection - %d\n", new_sd);
+          fds[nfds].fd = new_sd;
+          fds[nfds].events = POLLIN;
+          connected = nfds;
+          nfds++;
+
+          assert (nfds < MAX_POLL);
+          //TODO realloc
+
+
+        } while (new_sd != -1);
+
+      } else {
+        memset(buffer, 0, 4096);
+        len = 1;
+        rc = recv(fds[i].fd, buffer, 1, MSG_DONTWAIT);
+
+        // Ignore acks
+        if(buffer[0] == '+' || buffer[0] == '-'){
+          break;
+        }
+
+        do {
+          rc = recv(fds[i].fd, buffer + len, 1, 0);
+          if (rc < 0) {
+            perror("  recv() failed");
+            exit(1);
+          }
+
+          if (rc == 0) {
+            printf("  Connection closed\n");
+            exit(1);
+          }
+
+          len += rc;
+
+          if(buffer[len - 1] == '#'){
+            break;
+          }
+
+        } while(1);
+
+        rc = recv(fds[i].fd, cksum, 2, 0);
+
+
+        handle_gdb_command(buffer, len);
+      }
+    }
+  }while(connected == 0 || (step == 0 && cont == 0) || (step == 1 && nextstep == 0));
+}
+
+
+
+
+
+
 void
 emulate(void)
 {
@@ -325,6 +636,14 @@ emulate(void)
 			printf("Got ^C, stopping...\n");
 			abort_nodump();
 		}
+
+    if(is_break(registers[PC])){
+      printf("Breakpoint @%x\n", registers[PC]);
+      breakpoint();
+    }
+
+    nextstep = 0;
+    handle_gdb();
 
 #if SYMBOLIC
 		if (isregsym(PC)) {
@@ -346,6 +665,10 @@ emulate(void)
 			if (registers[SR] & 0x8000) {
 				unsigned op = (registers[SR] >> 8) & 0x7f;
 				callgate(op);
+        if(op > 0){
+          cont = 0;// auto break
+          breakpoint();
+        }
 			}
 		}
 
