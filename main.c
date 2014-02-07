@@ -255,7 +255,9 @@ emulate1(void)
 {
 	uint16_t instr;
 
+#ifndef EMU_CHECK
 	gdbstub_intr();
+#endif
 
 	pc_start = registers[PC];
 
@@ -1427,7 +1429,9 @@ abort_nodump(void)
 	print_regs();
 	print_ips();
 
+#ifndef EMU_CHECK
 	gdbstub_stopped();
+#endif
 	exit(1);
 }
 
@@ -1683,8 +1687,10 @@ callgate(unsigned op)
 		break;
 	}
 
+#ifndef EMU_CHECK
 	if (op > 0)
 		gdbstub_breakpoint();
+#endif
 }
 
 void
