@@ -20,3 +20,8 @@ Emulating
 =========
 
 Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
+
+License
+=======
+
+msp430-emu-uctf is released under the terms of the MIT license. See LICENSE.
