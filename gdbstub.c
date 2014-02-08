@@ -13,43 +13,90 @@
 int lsock = -1;
 int csock = -1;
 
-bool no_ack,
-     no_ack_test;
-
+bool		 stepone;	// Single-step?
+bool		 execute;	// Continue emu
 GHashTable	*breakpoints;	// addr -> NULL
 
 static void	 gdb_cmd(char *c, char *pound);
 
-static uint8_t
-gdb_cksum(uint8_t *s)
-{
-	uint8_t sum = 0;
+#define CMD_HANDLER(name) \
+static void	 gdb_##name(const char *cmd, const void *extra)
+CMD_HANDLER(getregs);
+CMD_HANDLER(setregs);
+CMD_HANDLER(readmem);
+CMD_HANDLER(writemem);
+CMD_HANDLER(addbreak);
+CMD_HANDLER(rembreak);
+CMD_HANDLER(conststring);
+CMD_HANDLER(step);
 
-	for (; *s; s++)
+static inline bool
+streq(const char *s1, const char *s2)
+{
+
+	return strcmp(s1, s2) == 0;
+}
+
+static inline bool
+startswith(const char *haystack, const char *prefix)
+{
+
+	return strncmp(haystack, prefix, strlen(prefix)) == 0;
+}
+
+static uint8_t
+gdb_cksum(void *v, size_t len)
+{
+	uint8_t sum = 0, *s = v;
+
+	for (; len && *s; s++, len--)
 		sum += *s;
 
 	return sum;
 }
 
-static void
-gdb_sendstr(char *s)
+static uint8_t
+gdb_cksumstr(void *s)
 {
-	unsigned chk, len;
-	char buf[4096], *p;
+
+	return gdb_cksum(s, SIZE_MAX);
+}
+
+static void
+gdb_sendraw(char *p, size_t len)
+{
 	ssize_t wr;
 
-	ASSERT(csock != -1, "csock");
+	ASSERT(csock != -1, "x");
 
-	chk = gdb_cksum((void*)s);
-	len = snprintf(buf, sizeof buf, "$%s#%02x", s, chk);
-
-	for (p = buf; len;) {
+	while (len) {
 		wr = send(csock, p, len, 0);
 		ASSERT(wr > 0, "send");
 
 		len -= (unsigned)wr;
 		p += (unsigned)wr;
 	}
+}
+
+static inline void
+gdb_sendrawstr(char *s)
+{
+
+	gdb_sendraw(s, strlen(s));
+}
+
+static void
+gdb_sendstr(const char *s)
+{
+	unsigned chk, len;
+	char buf[4096], *p;
+
+	ASSERT(csock != -1, "csock");
+
+	chk = gdb_cksumstr((void*)s);
+	len = snprintf(buf, sizeof buf, "$%s#%02x", s, chk);
+
+	gdb_sendraw(buf, len);
 }
 
 #define GDBSTUB_PORT 3713
@@ -134,6 +181,7 @@ gdbstub_interactive(void)
 	char *bp, *ep;
 	ssize_t rd;
 
+	execute = false;
 	ASSERT(csock != -1, "x");
 
 	do {
@@ -173,8 +221,10 @@ process:
 
 				processed_any = true;
 				bp = pound + 3;
+
+				if (execute)
+					break;
 			}
-			break;
 		}
 
 		if (bp != clientbuf) {
@@ -182,40 +232,106 @@ process:
 			memmove(clientbuf, bp, cblen);
 		}
 	} while (processed_any);
+
+	ASSERT(execute,
+	    "we shouldn't leave GDB interactive until we are told to");
 }
+
+struct cmd_dispatch {
+	const char	 *cmd,
+			 *extra;
+	void		(*handler)(const char *cmd, const void *extra);
+	bool		  continue_exec;
+};
+
+static struct cmd_dispatch gdb_disp[] = {
+	{ "g" /* fetch reGisters */, NULL, gdb_getregs, false, },
+	{ "G" /* set reGisters */, NULL, gdb_setregs, false, },
+	{ "m" /* read Memory */, NULL, gdb_readmem, false, },
+	{ "M" /* write Memory */, NULL, gdb_writemem, false, },
+	{ "Z0" /* break */, NULL, gdb_addbreak, false, },
+	{ "z0" /* unbreak */, NULL, gdb_rembreak, false, },
+	{ "qAttached" /* initial attach */, "1", gdb_conststring, false, },
+	{ "?" /* wat */, "S05", gdb_conststring, false, },
+	{ "Hg" /* ??? */, "OK", gdb_conststring, false, },
+	{ "Hc" /* ??? */, "OK", gdb_conststring, false, },
+	{ "c" /* Continue */, NULL, NULL, true, },
+	{ "s" /* Step */, NULL, gdb_step, true, },
+	{ 0 },
+};
+
 
 static void
 gdb_cmd(char *c, char *pound)
 {
+	unsigned ckcalc, cksend;
+	bool dispatched;
+	int rc;
 
-	// TODO FLESH THIS OUT.
-	printf("XXX Got cmd: %s\n", c);
-	exit(0);
+	ASSERT(*c != '+' && *c != '-', "should have been slurped already");
+
+	ckcalc = gdb_cksum(c+1, pound - c - 1);
+	rc = sscanf(pound, "#%2x", &cksend);
+	ASSERT(rc == 1, "proto");
+
+	if (ckcalc != cksend) {
+		gdb_sendrawstr("-");	// NAK
+		return;
+	}
+
+	gdb_sendrawstr("+");	// ACK
+	*pound = 0;
+
+	if (*c != '$') {
+		printf("XXX Got weird cmd: '%s'\n", c);
+		gdb_sendstr("");
+		return;
+	}
+	c++;
+
+	dispatched = false;
+	for (struct cmd_dispatch *d = gdb_disp; d->cmd; d++) {
+		if (startswith(c, d->cmd)) {
+			if (d->handler)
+				d->handler(c, d->extra);
+			dispatched = true;
+			execute = d->continue_exec;
+			break;
+		}
+	}
+
+	if (!dispatched) {
+		printf("XXX Got unhandled $cmd: '%s'\n", c);
+		gdb_sendstr("");
+		return;
+	}
 }
 
 // Called once per instruction
 void
 gdbstub_intr(void)
 {
-	int flag, rc;
+	int rc;
+	bool interact = false;
 
 	if (csock == -1)
 		return;
 
-	if (g_hash_table_contains(breakpoints, ptr(registers[PC]))) {
+	if (stepone) {
+		interact = true;
+		stepone = false;
+	} else if (g_hash_table_contains(breakpoints, ptr(registers[PC]))) {
 		printf("Breakpoint @%04x\n", (uns)registers[PC]);
+		interact = true;
 		gdbstub_breakpoint();
-
-		// XXX We may need to transmit something:
-		// microlathe:
-		// send('T%02x%s:%s;thread:1;' % (sig, 'pc', swapb('%.4x' % pc)))
-		// gdbstub_interactive();
 	}
 
-	// Anything else we need to watch on a per-instruction basis?
+	// XXX IF we broke, or single-stepped after previous request, then we
+	// need to return control to GDB.
+	if (interact)
+		gdbstub_interactive();
 
-	// Have client? Process all available commands, check for breakpoints,
-	// yada yada.
+	// Anything else we need to watch on a per-instruction basis?
 }
 
 void
@@ -223,7 +339,7 @@ gdbstub_breakpoint(void)
 {
 
 	ASSERT(csock != -1, "x");
-	gdb_sendstr("S05");	// TODO: What is S05?
+	gdb_sendstr("S05" /* trap */);
 }
 
 // Called when the program halts.
@@ -234,5 +350,157 @@ gdbstub_stopped(void)
 	if (csock == -1)
 		return;
 
-	//YYY;
+	close(csock);
+	csock = -1;
+}
+
+// char* cmd, void* extra
+CMD_HANDLER(getregs)
+{
+	char buf[16*4+1];
+	int rc;
+
+	(void)cmd;
+	(void)extra;
+
+	for (unsigned i = 0; i < 16; i++) {
+		rc = sprintf(&buf[i*4], "%02x%02x", registers[i] & 0xff,
+		    registers[i] >> 8);
+		ASSERT(rc == 4, "x");
+	}
+
+	gdb_sendstr(buf);
+}
+
+CMD_HANDLER(setregs)
+{
+	unsigned reglo, reghi, i;
+	int rc;
+
+	(void)extra;
+
+	cmd++;
+	for (i = 0; i < 16; i++) {
+		ASSERT(*cmd, "x");
+
+		rc = sscanf(cmd, "%02x%02x", &reglo, &reghi);
+		ASSERT(rc == 2, "x");
+
+		registers[i] = reglo | (reghi << 8);
+		cmd += 4;
+	}
+
+	gdb_sendstr("OK");
+}
+
+CMD_HANDLER(readmem)
+{
+	unsigned start, rlen, slen, i;
+	char buffer[4096+1] = { 0 };
+	int rc;
+
+	(void)extra;
+
+	cmd++;
+	rc = sscanf(cmd, "%x,%x", &start, &rlen);
+	ASSERT(rc == 2, "x");
+
+	// XXX Not sure this is correct, but per castorpilot's PR:
+	ASSERT(rlen*2 < sizeof buffer, "buffer overrun");
+	slen = 0;
+	for (i = 0; i < rlen; i += 4) {
+		rc = sprintf(&buffer[slen], "%02x%02x%02x%02x",
+		    membyte(start + i + 3), membyte(start + i + 2),
+		    membyte(start + i + 1), membyte(start + i));
+
+		ASSERT(rc == 8, "x");
+		slen += (unsigned)rc;
+	}
+
+	gdb_sendstr(buffer);
+}
+
+CMD_HANDLER(writemem)
+{
+	unsigned start, len, reg;
+	const char *hexs;
+	int rc, hex;
+
+	(void)extra;
+
+	cmd++;
+	hex = 0;
+
+	rc = sscanf(cmd, "%x,%x:%n", &start, &len, &hex);
+	ASSERT(rc == 2 || rc == 3, "x");
+
+	if (hex == 0) {
+		printf("ill-formed write: %s\n", cmd);
+		exit(1);
+	}
+
+	hexs = cmd + hex;
+
+	// XXX Not sure this is valid, but assumed by castorpilot:
+	ASSERT(len == 2, "x");
+
+	// Apparently we write words, not bytes ...
+	for (unsigned i = 0; i < len; i += 2) {
+		rc = sscanf(hexs + 2*i, "%04x", &reg);
+		ASSERT(rc == 1, "x");
+
+		memory[start + 2*i] = reg & 0xff;
+		memory[start + 2*i + 1] = reg >> 8;
+	}
+
+	gdb_sendstr("OK");
+}
+
+CMD_HANDLER(addbreak)
+{
+	int rc;
+	unsigned addr;
+
+	(void)extra;
+
+	cmd += strlen("Z0");
+	rc = sscanf(cmd, ",%x", &addr);
+	ASSERT(rc == 1, "x");
+
+	g_hash_table_insert(breakpoints, ptr(addr), NULL);
+
+	gdb_sendstr("OK");
+}
+
+CMD_HANDLER(rembreak)
+{
+	int rc;
+	unsigned addr;
+
+	(void)extra;
+
+	cmd += strlen("z0");
+	rc = sscanf(cmd, ",%x", &addr);
+	ASSERT(rc == 1, "x");
+
+	g_hash_table_remove(breakpoints, ptr(addr));
+
+	gdb_sendstr("OK");
+}
+
+CMD_HANDLER(conststring)
+{
+
+	(void)cmd;
+	gdb_sendstr(extra);
+}
+
+CMD_HANDLER(step)
+{
+
+	(void)cmd;
+	(void)extra;
+
+	stepone = true;
+	gdb_sendstr("S05");
 }
