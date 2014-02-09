@@ -393,6 +393,7 @@ CMD_HANDLER(setregs)
 	gdb_sendstr("OK");
 }
 
+// Read/write memory as a stream of bytes
 CMD_HANDLER(readmem)
 {
 	unsigned start, rlen, slen, i;
@@ -405,15 +406,12 @@ CMD_HANDLER(readmem)
 	rc = sscanf(cmd, "%x,%x", &start, &rlen);
 	ASSERT(rc == 2, "x");
 
-	// XXX Not sure this is correct, but per castorpilot's PR:
 	ASSERT(rlen*2 < sizeof buffer, "buffer overrun");
 	slen = 0;
-	for (i = 0; i < rlen; i += 4) {
-		rc = sprintf(&buffer[slen], "%02x%02x%02x%02x",
-		    membyte(start + i + 3), membyte(start + i + 2),
-		    membyte(start + i + 1), membyte(start + i));
+	for (i = 0; i < rlen; i++) {
+		rc = sprintf(&buffer[slen], "%02x", membyte(start + i));
 
-		ASSERT(rc == 8, "x");
+		ASSERT(rc == 2, "x");
 		slen += (unsigned)rc;
 	}
 
@@ -422,7 +420,7 @@ CMD_HANDLER(readmem)
 
 CMD_HANDLER(writemem)
 {
-	unsigned start, len, reg;
+	unsigned start, len, byte;
 	const char *hexs;
 	int rc, hex;
 
@@ -441,16 +439,11 @@ CMD_HANDLER(writemem)
 
 	hexs = cmd + hex;
 
-	// XXX Not sure this is valid, but assumed by castorpilot:
-	ASSERT(len == 2, "x");
-
-	// Apparently we write words, not bytes ...
-	for (unsigned i = 0; i < len; i += 2) {
-		rc = sscanf(hexs + 2*i, "%04x", &reg);
+	for (unsigned i = 0; i < len; i++) {
+		rc = sscanf(hexs + 2*i, "%02x", &byte);
 		ASSERT(rc == 1, "x");
 
-		memory[start + 2*i] = reg & 0xff;
-		memory[start + 2*i + 1] = reg >> 8;
+		memory[(start + i) & 0xffff] = byte;
 	}
 
 	gdb_sendstr("OK");
