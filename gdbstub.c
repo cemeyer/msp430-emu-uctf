@@ -4,6 +4,7 @@
 #include <err.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sysexits.h>
 #include <unistd.h>
 
@@ -166,7 +167,9 @@ gdbstub_init(void)
 	ASSERT(csock != -1, "gdbstub_accept");
 
 	breakpoints = g_hash_table_new(NULL, NULL);
-	gdbstub_interactive();
+
+	// Go to interactive before executing first instruction.
+	stepone = true;
 }
 
 // Called when emulator is stopped, awaiting remote commands. (Including
@@ -177,14 +180,25 @@ size_t cblen;
 void
 gdbstub_interactive(void)
 {
-	bool processed_any = false;
+	bool processed_any = true;
 	char *bp, *ep;
 	ssize_t rd;
+	int rc;
 
 	execute = false;
 	ASSERT(csock != -1, "x");
 
 	do {
+		if (!processed_any) {
+			struct pollfd pfd = { 0 };
+
+			pfd.fd = csock;
+			pfd.events = POLLIN;
+			rc = poll(&pfd, 1, -1);
+
+			ASSERT(rc >= 0, "poll: %s", strerror(errno));
+		}
+
 		rd = recv(csock, &clientbuf[cblen], sizeof clientbuf - cblen,
 		    MSG_DONTWAIT);
 		if (rd == 0) {
@@ -201,6 +215,7 @@ gdbstub_interactive(void)
 		cblen += (size_t)rd;
 
 process:
+		processed_any = false;
 		bp = clientbuf;
 		ep = &clientbuf[cblen];
 		// We have cblen valid bytes of protocol at p.
@@ -231,7 +246,7 @@ process:
 			cblen = ep - bp;
 			memmove(clientbuf, bp, cblen);
 		}
-	} while (processed_any);
+	} while (!execute);
 
 	ASSERT(execute,
 	    "we shouldn't leave GDB interactive until we are told to");
