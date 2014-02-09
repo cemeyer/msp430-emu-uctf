@@ -255,10 +255,6 @@ emulate1(void)
 {
 	uint16_t instr;
 
-#ifndef EMU_CHECK
-	gdbstub_intr();
-#endif
-
 	pc_start = registers[PC];
 
 #ifdef BF
@@ -377,6 +373,10 @@ emulate(void)
 			printf("symbolic PC\n");
 			abort_nodump();
 		}
+#endif
+
+#ifndef EMU_CHECK
+		gdbstub_intr();
 #endif
 
 		if (registers[PC] == 0x0010) {
