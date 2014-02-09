@@ -35,18 +35,6 @@ continue, and breakpoints.
 TODO
 ====
 
-- Fix memory read (/writes?). Pretty clearly broken right now:
-
-
-    (gdb) disas/r 0x4400,+0x100
-    Dump of assembler code from 0x4400 to 0x4500:
-    => 0x00004400:   44 15  .word   0x0044; ????
-       0x00004402:   42 5c  .word   0x1542; ????
-       0x00004404:   01 75  add     r12,    r1
-       0x00004406:   f3 35  subc.b  @r5+,   #1      ;r3 As==01
-       0x00004408:   d0 08  jge     $+930           ;abs 0x47aa
-
-
 - More advanced GDB integration (memory watchpoints, ...).
 
 License
