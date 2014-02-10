@@ -2,6 +2,12 @@
 
 #include "emu.h"
 
+struct inprec {
+	uint64_t	 ir_insn;
+	size_t		 ir_len;
+	char		 ir_inp[0];
+};
+
 uint16_t	 pc_start;
 uint8_t		 pageprot[0x100];
 uint16_t	 registers[16];
@@ -13,11 +19,15 @@ GHashTable	*memory_symbols;		// addr -> sexp*
 uint64_t	 start;
 uint64_t	 insns;
 uint64_t	 insnlimit;
+uint64_t	 insnreplaylim;
 uint16_t	 syminplen;
 bool		 off;
 bool		 unlocked;
 bool		 dep_enabled;
+bool		 replay_mode;
 bool		 ctrlc;
+
+GHashTable	*input_record;			// insns -> inprec
 
 #ifdef TRACE
 FILE		*trace;
@@ -198,6 +208,9 @@ main(int argc, char **argv)
 	syminplen = atoll(argv[2]);
 #endif
 
+	input_record = g_hash_table_new_full(NULL, NULL, NULL, free);
+	ASSERT(input_record, "x");
+
 	init();
 
 	idx = 0;
@@ -376,7 +389,21 @@ emulate(void)
 #endif
 
 #ifndef EMU_CHECK
-		gdbstub_intr();
+		if (replay_mode && insns >= insnreplaylim) {
+			replay_mode = false;
+			insnreplaylim = 0;
+			// return control to remote GDB
+			stepone = true;
+		}
+
+		if (!replay_mode)
+			gdbstub_intr();
+
+		if (replay_mode && insnreplaylim < insns) {
+			init();
+			registers[PC] = memword(0xfffe);
+			continue;
+		}
 #endif
 
 		if (registers[PC] == 0x0010) {
@@ -1613,17 +1640,15 @@ callgate(unsigned op)
 	switch (op) {
 	case 0x0:
 #ifndef QUIET
-		putchar((char)membyte(argaddr));
+		if (!replay_mode)
+			putchar((char)membyte(argaddr));
 #endif
 		break;
 	case 0x2:
-#ifndef QUIET
-		printf("Gets (':'-prefix for hex)> ");
-		fflush(stdout);
-#endif
 		getsaddr = memword(argaddr);
 		bufsz = (uns)memword(argaddr+2);
 #if SYMBOLIC
+		ASSERT(!replay_mode, "x");
 		ASSERT((uns)getsaddr + (uns)bufsz < 0x10000, "overflow");
 		bufsz = min((uns)syminplen, bufsz-1);
 		memset(&memory[getsaddr], 0, bufsz+1);
@@ -1686,11 +1711,6 @@ callgate(unsigned op)
 		unhandled(0x4130);
 		break;
 	}
-
-#ifndef EMU_CHECK
-	if (op > 0)
-		gdbstub_breakpoint();
-#endif
 }
 
 void
@@ -1705,16 +1725,45 @@ win(void)
 }
 
 #ifndef EMU_CHECK
+static void
+ins_inprec(char *dat, size_t sz)
+{
+	struct inprec *new_inp = malloc(sizeof *new_inp + sz + 1);
+
+	ASSERT(new_inp, "oom");
+
+	new_inp->ir_insn = insns;
+	new_inp->ir_len = sz + 1;
+	memcpy(new_inp->ir_inp, dat, sz);
+	new_inp->ir_inp[sz] = 0;
+
+	g_hash_table_insert(input_record, ptr(insns), new_inp);
+}
+
 void
 getsn(uint16_t addr, uint16_t bufsz)
 {
+	struct inprec *prev_inp;
 	char *buf;
 
 	ASSERT((size_t)addr + bufsz < 0xffff, "overflow");
-	memset(&memory[addr], 0, bufsz);
+	//memset(&memory[addr], 0, bufsz);
 
 	if (bufsz <= 1)
 		return;
+
+	prev_inp = g_hash_table_lookup(input_record, ptr(insns));
+	if (replay_mode)
+		ASSERT(prev_inp, "input at insn:%ju not found!\n",
+		    (uintmax_t)insns);
+
+	if (prev_inp) {
+		memcpy(&memory[addr], prev_inp->ir_inp, prev_inp->ir_len);
+		return;
+	}
+
+	printf("Gets (':'-prefix for hex)> ");
+	fflush(stdout);
 
 	buf = malloc(2 * bufsz + 2);
 	ASSERT(buf, "oom");
@@ -1726,8 +1775,10 @@ getsn(uint16_t addr, uint16_t bufsz)
 	if (buf[0] != ':') {
 		strncpy((char*)&memory[addr], buf, bufsz);
 		memory[addr + strlen(buf)] = 0;
+		ins_inprec(buf, bufsz);
 	} else {
-		for (unsigned i = 0; i < bufsz - 1u; i++) {
+		unsigned i;
+		for (i = 0; i < bufsz - 1u; i++) {
 			unsigned byte;
 
 			if (buf[2*i+1] == 0 || buf[2*i+2] == 0) {
@@ -1739,6 +1790,7 @@ getsn(uint16_t addr, uint16_t bufsz)
 			//printf("%02x", byte);
 			memory[addr + i] = byte;
 		}
+		ins_inprec((void*)&memory[addr], i);
 	}
 out:
 	free(buf);

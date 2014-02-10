@@ -10,6 +10,9 @@
 
 #include "emu.h"
 
+#define PKT_BUF_MAX 0x2000
+#define PKT_BUF_STR "2000"
+
 // Only one client allowed to debug at a time...
 int lsock = -1;
 int csock = -1;
@@ -30,6 +33,40 @@ CMD_HANDLER(addbreak);
 CMD_HANDLER(rembreak);
 CMD_HANDLER(conststring);
 CMD_HANDLER(step);
+CMD_HANDLER(bstep);
+
+struct cmd_dispatch {
+	const char	 *cmd,
+			 *extra;
+	void		(*handler)(const char *cmd, const void *extra);
+	bool		  continue_exec;
+};
+
+static struct cmd_dispatch gdb_disp[] = {
+	{ "g" /* fetch reGisters */, NULL, gdb_getregs, false, },
+	{ "G" /* set reGisters */, NULL, gdb_setregs, false, },
+	{ "m" /* read Memory */, NULL, gdb_readmem, false, },
+	{ "M" /* write Memory */, NULL, gdb_writemem, false, },
+	{ "Z0" /* break */, NULL, gdb_addbreak, false, },
+	{ "z0" /* unbreak */, NULL, gdb_rembreak, false, },
+	{ "qAttached" /* initial attach */, "1", gdb_conststring, false, },
+	{ "qSupported" /* feature enquiry */,
+		"qRelocInsn-"
+#if 0
+		";ConditionalBreakpoints+"
+		";StaticTracepoint+"
+		";ReverseContinue+"
+#endif
+		";ReverseStep+"
+		";PacketSize=" PKT_BUF_STR, gdb_conststring, false, },
+	{ "?" /* wat */, "S05", gdb_conststring, false, },
+	{ "Hg" /* ??? */, "OK", gdb_conststring, false, },
+	{ "Hc" /* ??? */, "OK", gdb_conststring, false, },
+	{ "c" /* Continue */, NULL, NULL, true, },
+	{ "s" /* Step */, NULL, gdb_step, true, },
+	{ "bs" /* Backwards step */, NULL, gdb_bstep, true, },
+	{ 0 },
+};
 
 static inline bool
 streq(const char *s1, const char *s2)
@@ -174,7 +211,7 @@ gdbstub_init(void)
 
 // Called when emulator is stopped, awaiting remote commands. (Including
 // initial state.)
-char clientbuf[8192];
+char clientbuf[PKT_BUF_MAX];
 size_t cblen;
 
 void
@@ -252,30 +289,6 @@ process:
 	    "we shouldn't leave GDB interactive until we are told to");
 }
 
-struct cmd_dispatch {
-	const char	 *cmd,
-			 *extra;
-	void		(*handler)(const char *cmd, const void *extra);
-	bool		  continue_exec;
-};
-
-static struct cmd_dispatch gdb_disp[] = {
-	{ "g" /* fetch reGisters */, NULL, gdb_getregs, false, },
-	{ "G" /* set reGisters */, NULL, gdb_setregs, false, },
-	{ "m" /* read Memory */, NULL, gdb_readmem, false, },
-	{ "M" /* write Memory */, NULL, gdb_writemem, false, },
-	{ "Z0" /* break */, NULL, gdb_addbreak, false, },
-	{ "z0" /* unbreak */, NULL, gdb_rembreak, false, },
-	{ "qAttached" /* initial attach */, "1", gdb_conststring, false, },
-	{ "?" /* wat */, "S05", gdb_conststring, false, },
-	{ "Hg" /* ??? */, "OK", gdb_conststring, false, },
-	{ "Hc" /* ??? */, "OK", gdb_conststring, false, },
-	{ "c" /* Continue */, NULL, NULL, true, },
-	{ "s" /* Step */, NULL, gdb_step, true, },
-	{ 0 },
-};
-
-
 static void
 gdb_cmd(char *c, char *pound)
 {
@@ -307,10 +320,10 @@ gdb_cmd(char *c, char *pound)
 	dispatched = false;
 	for (struct cmd_dispatch *d = gdb_disp; d->cmd; d++) {
 		if (startswith(c, d->cmd)) {
+			execute = d->continue_exec;
 			if (d->handler)
 				d->handler(c, d->extra);
 			dispatched = true;
-			execute = d->continue_exec;
 			break;
 		}
 	}
@@ -511,4 +524,21 @@ CMD_HANDLER(step)
 
 	stepone = true;
 	gdb_sendstr("S05");
+}
+
+CMD_HANDLER(bstep)
+{
+
+	(void)cmd;
+	(void)extra;
+
+	if (insns > 0) {
+		replay_mode = true;
+		insnreplaylim = insns - 1;
+		gdb_sendstr("S05");
+	} else {
+		// can't go backwards from 0!
+		gdb_sendstr("T05replaylog:begin;");
+		execute = false;
+	}
 }

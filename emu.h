@@ -68,7 +68,10 @@ extern GHashTable	*memory_symbols;		// addr -> struct sexp*
 extern bool		 off;
 extern bool		 unlocked;
 extern bool		 dep_enabled;
+extern bool		 replay_mode;
+extern bool		 stepone;
 extern uint64_t		 insns;
+extern uint64_t		 insnreplaylim;
 extern uint64_t		 insnlimit;
 
 #define DEP_R 0x4
