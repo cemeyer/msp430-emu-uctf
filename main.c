@@ -8,7 +8,8 @@ struct inprec {
 	char		 ir_inp[0];
 };
 
-uint16_t	 pc_start;
+uint16_t	 pc_start,
+		 instr_size;
 uint8_t		 pageprot[0x100];
 uint16_t	 registers[16];
 uint8_t		 memory[0x10000];
@@ -27,11 +28,11 @@ bool		 dep_enabled;
 bool		 replay_mode;
 bool		 ctrlc;
 
+bool		 tracehex;
+FILE		*tracefile;
+
 GHashTable	*input_record;			// insns -> inprec
 
-#ifdef TRACE
-FILE		*trace;
-#endif
 static bool	 diverged;
 
 #if SYMBOLIC
@@ -99,11 +100,6 @@ void
 init(void)
 {
 
-#ifdef TRACE
-	trace = fopen("msp430_trace.txt", "wb");
-	ASSERT(trace, "fopen");
-#endif
-
 	insns = 0;
 	off = unlocked = false;
 	start = now();
@@ -124,11 +120,6 @@ void
 destroy(void)
 {
 
-#ifdef TRACE
-	fflush(trace);
-	fclose(trace);
-	trace = NULL;
-#endif
 #if SYMBOLIC
 	ASSERT(memory_symbols, "mem_symbol_hash");
 	g_hash_table_destroy(memory_symbols);
@@ -160,7 +151,9 @@ usage(void)
 	printf("usage: msp430-emu FLAGS [binaryimage]\n"
 		"\n"
 		"  FLAGS:\n"
-		"    -g    Debug with GDB\n");
+		"    -g            Debug with GDB\n"
+		"    -t=TRACEFILE  Emit instruction trace\n"
+		"    -x            Trace output in hex\n");
 #endif
 		exit(1);
 }
@@ -184,10 +177,21 @@ main(int argc, char **argv)
 #if SYMBOLIC
 	romfname = argv[1];
 #else
-	while ((opt = getopt(argc, argv, "g")) != -1) {
+	while ((opt = getopt(argc, argv, "gt:x")) != -1) {
 		switch (opt) {
 		case 'g':
 			waitgdb = true;
+			break;
+		case 't':
+			tracefile = fopen(optarg, "wb");
+			if (!tracefile) {
+				printf("Failed to open tracefile `%s'\n",
+				    optarg);
+				exit(1);
+			}
+			break;
+		case 'x':
+			tracehex = true;
 			break;
 		default:
 			usage();
@@ -240,6 +244,9 @@ main(int argc, char **argv)
 	print_regs();
 	print_ips();
 
+	if (tracefile)
+		fclose(tracefile);
+
 	return 0;
 }
 #endif
@@ -269,6 +276,7 @@ emulate1(void)
 	uint16_t instr;
 
 	pc_start = registers[PC];
+	instr_size = 2;
 
 #ifdef BF
 	if (registers[PC] & 0x1) {
@@ -339,16 +347,26 @@ emulate1(void)
 	}
 #endif
 
-#ifdef TRACE
-	if (registers[PC] > pc_start && registers[PC] - pc_start <= 6) {
-		if (bits(instr, 15, 13) != 0x2000) {
-			for (unsigned i = 0; i < ((unsigned)registers[PC] - pc_start); i += 2)
-				fprintf(trace, "%02x%02x ", (uns)membyte(pc_start+i),
+	if (!replay_mode && tracefile) {
+		ASSERT((instr_size / 2) > 0 && (instr_size / 2) < 4,
+		    "instr_size: %d", instr_size);
+
+		for (unsigned i = 0; i < instr_size; i += 2) {
+			if (tracehex)
+				fprintf(tracefile, "%02x%02x ",
+				    (uns)membyte(pc_start+i),
 				    (uns)membyte(pc_start+i+1));
-			fprintf(trace, "\n");
+			else {
+				size_t wr;
+				wr = fwrite(&memory[(pc_start + i) & 0xffff],
+				    2, 1, tracefile);
+				ASSERT(wr == 1, "fwrite: %s", strerror(errno));
+			}
 		}
+
+		if (tracehex)
+			fprintf(tracefile, "\n");
 	}
-#endif
 
 out:
 	insns++;
@@ -1233,6 +1251,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 #endif
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
+			instr_size += 2;
 
 			*srckind = OP_MEM;
 			*srcval = extensionword;
@@ -1285,6 +1304,7 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 #endif
 			extensionword = memword(registers[PC]);
 			inc_reg(PC, 0);
+			instr_size += 2;
 			*srckind = OP_MEM;
 #if SYMBOLIC
 			ASSERT(!isregsym(instr_decode_src), "symbolic load addr"
@@ -1316,6 +1336,8 @@ load_src(uint16_t instr, uint16_t instr_decode_src, uint16_t As, uint16_t bw,
 #endif
 			*srcval = registers[instr_decode_src];
 			inc_reg(instr_decode_src, bw);
+			if (instr_decode_src == PC)
+				instr_size += 2;
 			break;
 		default:
 			illins(instr);
@@ -1360,6 +1382,7 @@ load_dst(uint16_t instr, uint16_t instr_decode_dst, uint16_t Ad,
 #endif
 		extensionword = memword(registers[PC]);
 		inc_reg(PC, 0);
+		instr_size += 2;
 
 		if (instr_decode_dst != SR) {
 #if SYMBOLIC
