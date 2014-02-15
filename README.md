@@ -7,9 +7,6 @@ emulates the inaccurate flags behavior of the real thing
 Haswell Xeon), and certainly faster than the real thing (25 MHz, with 2-3
 cycles per instruction).
 
-I tried to add symbolic execution to solve Hollywood, but alas, I am stupid.
-Anyway, maybe it can help you.
-
 Building
 ========
 
@@ -28,16 +25,35 @@ Use the `-t=TRACE_FILE` option to `msp430-emu` to log a binary trace of all
 instructions executed to `TRACE_FILE`. Use the `-x` flag to dump in hex format
 instead of binary.
 
-GDB
-===
+GDB: Installing msp430-gdb
+==========================
 
-Invoke `msp430-emu -g <romfile>` to wait for GDB on startup. Use `msp430-gdb`
-to connect (mspgcc patchset on top of gdb-7.2a) with:
+First, you will need to install `msp430-gdb`. Many Linux distributions have
+this as a package (sometimes under the name `gdb-msp430`).
+
+If you don't have it as a distro package, you can download the gdb-7.2a sources
+from a GNU mirror, apply the mspgcc-2012xxx-gdb patches against those sources,
+and configure with something like `--program-prefix=msp430- --prefix=$HOME/.local`
+for a `msp430-gdb` tool installed in your `$HOME` directory.
+
+GDB: Debugging Emulated ROMs
+============================
+
+Invoke `msp430-emu -g <romfile>` to wait for GDB on startup. The emulator binds
+TCP port 3713 and waits for the first client to connect. Use `msp430-gdb` from
+another terminal to connect (mspgcc patchset on top of gdb-7.2a) with:
 
     msp430-gdb -ex 'target remote localhost:3713'
 
-Supported commands are reading/writing registers and memory, stepping,
-continue, and breakpoints.
+Supported commands are:
+* reading/writing registers
+* reading/writing memory
+* (instruction) stepping, reverse-stepping
+* breakpoints, continue
+
+TODO:
+* Memory watchpoints
+* reverse-continue
 
 GDB: Reverse debugging
 ======================
@@ -75,12 +91,10 @@ Go back one instruction.
 
 It's no longer set!
 
-TODO
-====
-
-- More advanced GDB integration (memory watchpoints, ...).
-
 License
 =======
 
 msp430-emu-uctf is released under the terms of the MIT license. See LICENSE.
+Basically, do what you will with it. If you want to throw credit, money, or
+praise my way, I would love it. I am also happy to get negative feedback. Let
+me know what you would like to see improved!
