@@ -1,22 +1,41 @@
 msp430-emu-uctf [![Build Status](https://travis-ci.org/cemeyer/msp430-emu-uctf.png?branch=master)](https://travis-ci.org/cemeyer/msp430-emu-uctf)
 ===================
 
-This is an msp430-alike emulator for Matasano/Square's #µctf. It faithfully
-emulates the inaccurate flags behavior of the real thing
-(http://microcorruption.com/). It's pretty fast (~48 M Instr/sec on 3 GHz
-Haswell Xeon), and certainly faster than the real thing (25 MHz, with 2-3
-cycles per instruction).
+This is an msp430-alike emulator for Matasano/Square's #µctf.
+
+What can I do with it?
+======================
+
+* Use it to debug or solve Microcorruption puzzles offline
+* Use it to debug or emualate other trivial MSP430 embedded programs (with the
+  same weird register and callgate behavior of Microcorruption...)
+* Embed it into something weirder and cooler! I don't even know.
+
+Why not mspsim, mspdebug?
+=========================
+
+msp430-emu-uctf (that's a mouthful, isn't it) faithfully emulates the
+inaccurate flags and instruction decode behavior of the
+[Microcorruption](http://microcorruption.com/) web emulator and debugger. This
+is useful on many #µctf levels. It also has enough of the callgate (0x0010)
+implemented to successfully debug and defeat all of the puzzles.
+
+Without making any comparison to the speed of mspsim or mspdebug,
+msp430-emu-uctf is decently fast (emulates about 48 Million msp430 instructions
+per second on my Intel E3-1240v3), and is probably faster than any hardware
+MSP430 ever built (typically they are 25 MHz, with 2-3 cycles per instruction).
 
 Building
 ========
 
-`make` will build the emulator, `msp430-emu`. `make msp430-sym` will build
-the symbolic emulator.
+`make` will build the emulator, `msp430-emu`.
 
-Emulating
-=========
+This is not packaged for installation at this time. Patches welcome.
 
-Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
+Simple Emulation
+================
+
+Invoke `msp430-emu <romfile>`.
 
 Tracing
 =======
@@ -91,6 +110,25 @@ Go back one instruction.
 
 It's no longer set!
 
+Symbolic Emulation
+==================
+
+`make msp430-sym` will build the symbolic emulator.
+
+Caveat: symbolic execution is much, much slower than direct emulation.
+
+To run a level in symbolic mode, invoke the emulator like so:
+
+    msp430-sym <romfile> <input length>
+
+This mode is less tested. On some levels you will see that register or PC loads
+are dependent on symbolic inputs -- that means your input controls register
+contents or code flow (exploitable!).
+
+On Hollywood, with the right input size, this will emit gibberish. But that
+gibberish is not too far from the truth. I recommend using the tracing mode to
+defeat Hollywood, rather than trying to parse the symbolic output.
+
 License
 =======
 
@@ -98,3 +136,17 @@ msp430-emu-uctf is released under the terms of the MIT license. See LICENSE.
 Basically, do what you will with it. If you want to throw credit, money, or
 praise my way, I would love it. I am also happy to get negative feedback. Let
 me know what you would like to see improved!
+
+Hacking
+=======
+
+Try it out! Let me know what you don't like; send me patches, or file issues. I
+can't promise I'll fix anything quickly, but I'd rather know what's wrong.
+
+Style: The C sources attempt to follow BSD's
+[style(9)](http://www.freebsd.org/cgi/man.cgi?query=style&sektion=9). Style fix
+patches are welcome.
+
+Most of the emulator (including symbolic mode) lives in `main.c`. Most of the
+GDB remote stub lives in `gdbstub.c`. There are instruction emulation and
+symbolic mode optimization unit tests in `check_instr.c`.
