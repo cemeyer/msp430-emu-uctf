@@ -21,6 +21,13 @@ Emulating
 
 Simply invoke `msp430-emu <romfile>` or `msp430-sym <romfile> <input length>`.
 
+Tracing
+=======
+
+Use the `-t=TRACE_FILE` option to `msp430-emu` to log a binary trace of all
+instructions executed to `TRACE_FILE`. Use the `-x` flag to dump in hex format
+instead of binary.
+
 GDB
 ===
 
@@ -32,52 +39,41 @@ to connect (mspgcc patchset on top of gdb-7.2a) with:
 Supported commands are reading/writing registers and memory, stepping,
 continue, and breakpoints.
 
-Stepping Backwards
-==================
+GDB: Reverse debugging
+======================
 
 In gdb, you can use `reverse-stepi` (or `rsi` for short) to step backwards. For
 example (from Hanoi):
 
-    $ msp430-gdb -nx -ex 'target remote localhost:3713' -ex 'display/i $pc'
+    $ msp430-gdb -nx -ex 'target remote localhost:3713'
 
+    (gdb) x/i $pc
+    => 0x4400: mov #17408, r1 ;#0x4400
+
+The next instruction will put 0x4400 in `r1` (`SP`).
+
+    (gdb) p $r1
+    $1 = (void *) 0x0
+
+Do it...
+
+    (gdb) si
+    0x00004404 in ?? ()
+
+    (gdb) p $r1
+    $2 = (void *) 0x4400
+
+Ok, it is set to 0x4400 now.
+
+    (gdb) rsi
     0x00004400 in ?? ()
-    1: x/i $pc
-    => 0x4400:      mov     #17408, r1      ;#0x4400
-    (gdb) b *0x4540
-    Breakpoint 1 at 0x4540
-    (gdb) c
-    Continuing.
-    Breakpoint 1, 0x00004540 in ?? ()
-    1: x/i $pc
-    => 0x4540:      mov     #9216,  r15     ;#0x2400
-    (gdb) rsi
-    0x000045dc in ?? ()
-    1: x/i $pc
-    => 0x45dc:      ret
-    (gdb) rsi
-    0x000045d8 in ?? ()
-    1: x/i $pc
-    => 0x45d8:      add     #6,     r1      ;#0x0006
-    (gdb) rsi
-    0x00004590 in ?? ()
-    1: x/i $pc
-    => 0x4590:      ret
-    (gdb) rsi
-    0x0000458e in ?? ()
-    1: x/i $pc
-    => 0x458e:      pop     r2
-    (gdb) rsi
-    0x00000010 in ?? ()
-    1: x/i $pc
-    => 0x10:        ret
-    (gdb) rsi
-    0x0000458a in ?? ()
-    1: x/i $pc
-    => 0x458a:      call    #0x0010
-    (gdb) rsi
-    0x00004586 in ?? ()
-    1: x/i $pc
-    => 0x4586:      bis     #-32768,r2      ;#0x8000
+
+Go back one instruction.
+
+    (gdb) p $r1
+    $3 = (void *) 0x0
+
+It's no longer set!
 
 TODO
 ====
