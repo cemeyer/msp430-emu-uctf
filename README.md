@@ -47,8 +47,25 @@ instead of binary.
 GDB: Installing msp430-gdb
 ==========================
 
-First, you will need to install `msp430-gdb`. Many Linux distributions have
-this as a package (sometimes under the name `gdb-msp430`).
+msp430-gdb is `gdb` with a set of patches applied from the `mspgcc` project.
+
+Ubuntu or Debian:
+-----------------
+
+`apt-get install gdb-msp430`
+
+Arch:
+-----
+
+Install `gdb-msp430` via pacman.
+
+Gentoo:
+-------
+
+Install `dev-embedded/msp430-gdb`.
+
+Fedora and others:
+------------------
 
 If you don't have it as a distro package, you can download the gdb-7.2a sources
 from a GNU mirror, apply the mspgcc-2012xxx-gdb patches against those sources,
