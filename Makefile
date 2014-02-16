@@ -19,11 +19,3 @@ check: check_instr
 
 check_instr: check_instr.c main.c emu.h
 	gcc $(DBGFLAGS) $(FLAGS) $(GLIB_FLAGS) -DSYMBOLIC=1 -DEMU_CHECK $< main.c -lcheck $(GLIB_LDFLAGS) $(EXTRAFLAGS) -o $@
-
-bfnovo: bfnovo.c main.c emu.h
-	@rm -f *.gcda
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-generate -DSYMBOLIC=0 -DBF=1 -DEMU_CHECK -DQUIET -DREALLYFAST $< main.c -o prof-$@
-	BF_GENERATE=1 ./prof-$@
-	@rm -f ./prof-$@
-	gcc $(OPTFLAGS) $(FLAGS) $(GLIB_FLAGS) -fprofile-use -DSYMBOLIC=0 -DBF=1 -DEMU_CHECK -DQUIET -DREALLYFAST $< main.c -o $@
-	@rm -f *.gcda
