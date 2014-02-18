@@ -536,6 +536,11 @@ handle_jump(uint16_t instr)
 		if (registers[SR] & SR_C)
 			shouldjump = true;
 		break;
+	case 0x4:
+		// JN
+		if (registers[SR] & SR_N)
+			shouldjump = true;
+		break;
 	case 0x5:
 		// JGE
 		{

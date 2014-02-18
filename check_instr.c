@@ -529,6 +529,38 @@ START_TEST(test_jmp_ge)
 }
 END_TEST
 
+START_TEST(test_jmp_n)
+{
+	uint16_t code[] = {
+		// jn $+0x10
+		0x3007,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = 0;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 2);
+}
+END_TEST
+
+START_TEST(test_jmp_n2)
+{
+	uint16_t code[] = {
+		// jn $+0x10
+		0x3007,
+	};
+
+	install_words_le(code, CODE_STEP, sizeof(code));
+	registers[SR] = SR_N;
+
+	emulate1();
+
+	ck_assert(registers[PC] == CODE_STEP + 0x10);
+}
+END_TEST
+
 START_TEST(test_add_imm_reg)
 {
 	uint16_t code[] = {
@@ -1910,6 +1942,8 @@ suite_instr(void)
 	tcase_add_test(tjmp, test_jmp_c);
 	tcase_add_test(tjmp, test_jmp_c2);
 	tcase_add_test(tjmp, test_jmp_ge);
+	tcase_add_test(tjmp, test_jmp_n);
+	tcase_add_test(tjmp, test_jmp_n2);
 	suite_add_tcase(s, tjmp);
 
 	TCase *tsub = tcase_create("sub");
