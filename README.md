@@ -28,6 +28,11 @@ MSP430 ever built (typically they are 25 MHz, with 2-3 cycles per instruction).
 Building
 ========
 
+You will need `glib` and its development files (specifically, package config
+`.pc` files) installed. On Fedora, you can install these with `yum install
+glib2 glib2-devel`. On Ubuntu, use `apt-get install libglib2.0-0
+libglib2.0-dev`.
+
 `make` will build the emulator, `msp430-emu`.
 
 This is not packaged for installation at this time. Patches welcome.
