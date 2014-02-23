@@ -33,7 +33,9 @@ You will need `glib` and its development files (specifically, package config
 glib2 glib2-devel`. On Ubuntu, use `apt-get install libglib2.0-0
 libglib2.0-dev`.
 
-`make` will build the emulator, `msp430-emu`.
+On systems with older GCC (Ubuntu), use `make NEWGCCFLAGS= EXTRAFLAGS=-lrt`.
+
+On newer systems, `make` will build the emulator, `msp430-emu`.
 
 This is not packaged for installation at this time. Patches welcome.
 

@@ -4,4 +4,7 @@ compiler:
     - gcc
 before_install:
     - sudo apt-get -y install check
-script: make NEWGCCFLAGS= EXTRAFLAGS=-lrt check
+script:
+    - make NEWGCCFLAGS= EXTRAFLAGS=-lrt
+    - make NEWGCCFLAGS= EXTRAFLAGS=-lrt check
+    - make NEWGCCFLAGS= EXTRAFLAGS=-lrt msp430-sym
