@@ -1,13 +1,13 @@
 msp430-emu-uctf [![Build Status](https://travis-ci.org/cemeyer/msp430-emu-uctf.png?branch=master)](https://travis-ci.org/cemeyer/msp430-emu-uctf)
 ===================
 
-This is an msp430-alike emulator for Matasano/Square's #µctf.
+This is an msp430-alike emulator for Matasano/Square's #µctf (Microcorruption).
 
 What can I do with it?
 ======================
 
 * Use it to debug or solve Microcorruption puzzles offline
-* Use it to debug or emualate other trivial MSP430 embedded programs (with the
+* Use it to debug or emulate other trivial MSP430 embedded programs (with the
   same weird register and callgate behavior of Microcorruption...)
 * Embed it into something weirder and cooler! I don't even know.
 
@@ -157,9 +157,7 @@ License
 =======
 
 msp430-emu-uctf is released under the terms of the MIT license. See LICENSE.
-Basically, do what you will with it. If you want to throw credit, money, or
-praise my way, I would love it. I am also happy to get negative feedback. Let
-me know what you would like to see improved!
+Basically, do what you will with it.
 
 Hacking
 =======
