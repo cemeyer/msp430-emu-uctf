@@ -1801,6 +1801,15 @@ getsn(uint16_t addr, uint16_t bufsz)
 		goto out;
 
 	if (buf[0] != ':') {
+		size_t len;
+
+		len = strlen(buf);
+		while (len > 0 &&
+		    (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+			buf[len - 1] = '\0';
+			len--;
+		}
+
 		strncpy((char*)&memory[addr], buf, bufsz);
 		memory[addr + strlen(buf)] = 0;
 		ins_inprec(buf, bufsz);
